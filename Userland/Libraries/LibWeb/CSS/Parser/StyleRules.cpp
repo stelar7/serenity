@@ -147,6 +147,7 @@ String StyleDeclarationRule::to_string() const
     builder.append(m_name);
     builder.append(": ");
     append_with_to_string(builder, " ", m_values);
+    append_raw(builder, " ", temp);
 
     if (m_important)
         builder.append(" !important");

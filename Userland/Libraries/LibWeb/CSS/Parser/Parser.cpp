@@ -5,6 +5,7 @@
  */
 
 #include <AK/SourceLocation.h>
+#include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/Parser/AtStyleRule.h>
 #include <LibWeb/CSS/Parser/DeclarationOrAtRule.h>
 #include <LibWeb/CSS/Parser/Parser.h>
@@ -68,17 +69,58 @@ Vector<QualifiedStyleRule> Parser::parse_as_stylesheet()
     dbgln("Printing rules:");
 
     for (auto& rule : rules) {
-        dbgln("PRE:");
+        dbgln("Selectors:");
         for (auto& pre : rule.m_prelude) {
             dbgln("{}", pre);
         }
-        dbgln("BLOCK:");
+        dbgln("Block:");
         dbgln("{}", rule.m_block.to_string());
         dbgln("");
 
+        // This double parsing shouldnt be needed, see TODO in parse_selectors.
         auto selectors = parse_selectors(rule.m_prelude);
         CSS::Selector selector = Selector(move(selectors));
         dump_selector(selector);
+
+        auto rules = parse_block(rule.m_block.m_values);
+        dbgln("Parsed block:");
+        for (auto& rule : rules) {
+            dbgln("{}", rule.to_string());
+        }
+
+        dbgln("");
+        dbgln("");
+    }
+
+    return rules;
+}
+
+Vector<StyleDeclarationRule> Parser::parse_block(Vector<String> block)
+{
+    Vector<StyleDeclarationRule> rules;
+
+    StyleDeclarationRule current;
+    for (size_t i = 0; i < block.size(); i++) {
+        current.m_name = block.at(i);
+        VERIFY(block.at(++i) == ":");
+
+        for (;;) {
+            auto value = block.at(++i);
+
+            if (value == ";") {
+                break;
+            }
+
+            if (value == "!" && block.at(++i) == "important") {
+                current.m_important = true;
+                continue;
+            }
+
+            current.temp.append(value);
+        }
+
+        rules.append(current);
+        current = {};
     }
 
     return rules;
@@ -138,7 +180,7 @@ Vector<CSS::Selector::ComplexSelector> Parser::parse_selectors(Vector<String> pa
         if (currentToken.starts_with('[')) {
             auto adjusted = currentToken.substring(1, currentToken.length() - 2);
 
-            // TODO: split on String :^)
+            // TODO: split on String, this will remove the need for spaces in the strings below
             Vector<String> attribute_parts = adjusted.split(',');
 
             simple_selector.attribute_match_type = CSS::Selector::SimpleSelector::AttributeMatchType::HasAttribute;
@@ -164,7 +206,7 @@ Vector<CSS::Selector::ComplexSelector> Parser::parse_selectors(Vector<String> pa
                 attribute_index += 2;
             }
 
-            simple_selector.attribute_value = attribute_parts.at(attribute_index);
+            simple_selector.attribute_value = attribute_parts.at(attribute_index).substring(1);
             return simple_selector;
         }
 

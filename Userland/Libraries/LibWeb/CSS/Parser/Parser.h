@@ -43,6 +43,7 @@ public:
     Vector<StyleComponentValueRule> parse_as_list_of_comma_separated_component_values();
 
     Vector<CSS::Selector::ComplexSelector> parse_selectors(Vector<String> parts);
+    Vector<StyleDeclarationRule> parse_block(Vector<String> parts);
 
     // FIXME: https://www.w3.org/TR/selectors-4/
     Optional<String> parse_a_selector() { return {}; }

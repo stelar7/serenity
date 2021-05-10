@@ -25,6 +25,7 @@ private:
     String m_name;
     Vector<StyleComponentValueRule> m_values;
     bool m_important { false };
+    Vector<String> temp;
 };
 
 }
