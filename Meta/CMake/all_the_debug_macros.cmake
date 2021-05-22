@@ -218,6 +218,7 @@ set(WINDOWMANAGER_DEBUG ON)
 set(WSMESSAGELOOP_DEBUG ON)
 set(WSSCREEN_DEBUG ON)
 set(XML_PARSER_DEBUG ON)
+set(FTP_DEBUG ON)
 
 # False positive: DEBUG is a flag but it works differently.
 # set(DEBUG ON)

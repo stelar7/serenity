@@ -27,6 +27,8 @@ alias sl=Solitaire
 alias ue=UserspaceEmulator
 alias fe=FontEditor
 alias ss=Spreadsheet
+alias ftpserver=FTPServer
+alias ftpclient=FTPClient
 
 alias ll='ls -l'
 
