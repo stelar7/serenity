@@ -8,12 +8,12 @@
 #include "ExportDialog.h"
 #include "ImportDialog.h"
 #include "JSIntegration.h"
-#include "Readers/CSV.h"
-#include "Writers/CSV.h"
 #include <AK/ByteBuffer.h>
 #include <AK/JsonArray.h>
 #include <AK/JsonObjectSerializer.h>
 #include <AK/Stream.h>
+#include <LibCSV/Readers/XSV.h>
+#include <LibCSV/Writers/XSV.h>
 #include <LibCore/File.h>
 #include <LibCore/FileStream.h>
 #include <LibCore/MimeData.h>

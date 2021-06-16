@@ -8,7 +8,6 @@
 
 #include "Cell.h"
 #include "Forward.h"
-#include "Readers/XSV.h"
 #include <AK/HashMap.h>
 #include <AK/HashTable.h>
 #include <AK/String.h>
@@ -17,6 +16,7 @@
 #include <AK/Types.h>
 #include <AK/WeakPtr.h>
 #include <AK/Weakable.h>
+#include <LibCSV/Readers/XSV.h>
 #include <LibCore/Object.h>
 #include <LibJS/Interpreter.h>
 

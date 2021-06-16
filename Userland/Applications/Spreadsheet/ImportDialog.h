@@ -6,9 +6,9 @@
 
 #pragma once
 
-#include "Readers/XSV.h"
 #include <AK/Result.h>
 #include <AK/StringView.h>
+#include <LibCSV/Readers/XSV.h>
 #include <LibGUI/Forward.h>
 #include <LibGUI/Wizards/WizardPage.h>
 
