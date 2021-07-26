@@ -35,6 +35,7 @@ option(ENABLE_ALL_DEBUG_FACILITIES "Enable all noisy debug symbols and options. 
 option(ENABLE_COMPILETIME_FORMAT_CHECK "Enable compiletime format string checks" ON)
 option(ENABLE_PCI_IDS_DOWNLOAD "Enable download of the pci.ids database at build time" ON)
 option(ENABLE_USB_IDS_DOWNLOAD "Enable download of the usb.ids database at build time" ON)
+option(ENABLE_TIMEZONE_DATABASE_DOWNLOAD "Enable download of IANA timezone files at build time" ON)
 option(BUILD_LAGOM "Build parts of the system targeting the host OS for fuzzing/testing" OFF)
 option(ENABLE_KERNEL_LTO "Build the kernel with link-time optimization" OFF)
 
@@ -157,6 +158,25 @@ unset(CMAKE_SYSROOT)
 set(CMAKE_STAGING_PREFIX ${CMAKE_BINARY_DIR}/Root)
 set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/Root)
 set(CMAKE_INSTALL_DATAROOTDIR ${CMAKE_BINARY_DIR}/Root/res)
+
+# The time zone file needs to be extracted before the code generator is started
+# And the code generator needs to run before we swap to a non-lagom build
+set(TIMEZONE_DATA_URL https://data.iana.org/time-zones/releases/tzdata2021a.tar.gz)
+set(TIMEZONE_DATA_PATH ${CMAKE_BINARY_DIR}/IANA/timezone_data.tar.gz)
+set(TIMEZONE_INSTALL_PATH ${CMAKE_INSTALL_DATAROOTDIR}/IANA/TimeZone)
+
+if (ENABLE_TIMEZONE_DATABASE_DOWNLOAD AND NOT EXISTS ${TIMEZONE_DATA_PATH})
+    message(STATUS "Downloading IANA time zone database from ${TIMEZONE_DATA_URL}...")
+    file(DOWNLOAD ${TIMEZONE_DATA_URL} ${TIMEZONE_DATA_PATH} INACTIVITY_TIMEOUT 10)
+endif()
+
+if (EXISTS ${TIMEZONE_DATA_PATH} AND NOT EXISTS ${TIMEZONE_INSTALL_PATH})
+    message(STATUS "Extracting IANA time zone database to ${TIMEZONE_INSTALL_PATH}...")
+    file(MAKE_DIRECTORY ${TIMEZONE_INSTALL_PATH})
+    execute_process(COMMAND tar -xzf ${TIMEZONE_DATA_PATH} -C ${TIMEZONE_INSTALL_PATH})
+endif()
+
+add_subdirectory(Userland/Libraries/LibDateTime/TimeZone/CodeGenerators)
 
 set(GCC_VERSION 11.1.0)
 

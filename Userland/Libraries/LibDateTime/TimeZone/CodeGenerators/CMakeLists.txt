@@ -1,0 +1,2 @@
+add_executable(GenerateTimeZoneData GenerateTimeZoneData.cpp)
+target_link_libraries(GenerateTimeZoneData LagomCore)
