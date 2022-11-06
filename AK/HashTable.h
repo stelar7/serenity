@@ -581,7 +581,10 @@ private:
                     // The target bucket is a used bucket that hasn't been re-hashed.
                     // Swap the data into the target; now the target's data resides in the bucket to move again.
                     // (That's of course what we want, how neat!)
-                    swap(*bucket_to_move->slot(), *target_bucket->slot());
+                    auto tmp = move(*bucket_to_move->slot());
+                    *bucket_to_move->slot() = move(*target_bucket->slot());
+                    *target_bucket->slot() = move(tmp);
+
                     bucket_to_move->state = target_bucket->state;
                     target_bucket->state = BucketState::Rehashed;
 

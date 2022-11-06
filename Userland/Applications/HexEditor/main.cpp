@@ -7,6 +7,7 @@
  */
 
 #include "HexEditorWidget.h"
+#include "Templates/TemplateParser.h"
 #include <LibConfig/Client.h>
 #include <LibCore/System.h>
 #include <LibDesktop/Launcher.h>
@@ -21,6 +22,16 @@
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
     TRY(Core::System::pledge("stdio recvfd sendfd rpath unix cpath wpath thread"));
+
+    u8 input[] { 0x01, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    ByteBuffer bytes = TRY(ByteBuffer::copy(input, 15));
+
+    // auto parser = TemplateParser("struct main { u8 first; u16 second; u32 third; u64 fourth; }");
+    auto parser = TemplateParser("struct nested { u8 d;} struct header { nested a; u8 b; u8 c; } struct main { header header; u32 something; u64 else; }");
+    auto parse_result = parser.parse(bytes);
+    if (parse_result.is_error()) {
+        dbgln("{}", parse_result.error());
+    }
 
     auto app = TRY(GUI::Application::try_create(arguments));
 

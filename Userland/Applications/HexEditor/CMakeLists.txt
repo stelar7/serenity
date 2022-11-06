@@ -15,6 +15,7 @@ set(SOURCES
     HexEditor.cpp
     HexEditorWidget.cpp
     main.cpp
+    Templates/TemplateParser.cpp
 )
 
 set(GENERATED_SOURCES
