@@ -150,7 +150,7 @@ static ErrorOr<CertificateKeyAlgorithm> oid_to_algorithm(Vector<int> algorithm)
     return Error::from_string_view(TRY(String::formatted("Unknown algorithm oid {}", algorithm)));
 }
 
-static ErrorOr<Crypto::UnsignedBigInteger> parse_version(Crypto::ASN1::Decoder& decoder, Vector<StringView> current_scope)
+static ErrorOr<Crypto::UnsignedBigInteger> parse_certificate_version(Crypto::ASN1::Decoder& decoder, Vector<StringView> current_scope)
 {
     // Version ::= INTEGER {v1(0), v2(1), v3(2)}
     if (auto tag = decoder.peek(); !tag.is_error() && tag.value().type == Crypto::ASN1::Type::Constructed) {
@@ -748,7 +748,7 @@ static ErrorOr<Certificate> parse_tbs_certificate(Crypto::ASN1::Decoder& decoder
     ENTER_TYPED_SCOPE(Sequence, "TBSCertificate"sv);
 
     Certificate certificate;
-    certificate.version = TRY(parse_version(decoder, current_scope)).to_u64();
+    certificate.version = TRY(parse_certificate_version(decoder, current_scope)).to_u64();
     certificate.serial_number = TRY(parse_serial_number(decoder, current_scope));
     certificate.algorithm = TRY(parse_algorithm_identifier(decoder, current_scope));
     certificate.issuer = TRY(parse_name(decoder, current_scope));
