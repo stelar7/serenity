@@ -18,6 +18,7 @@ namespace Crypto {
 namespace Hash {
 
 enum class HashKind {
+    Unknown,
     None,
     SHA1,
     SHA256,
@@ -93,7 +94,7 @@ public:
         m_pre_init_buffer = ByteBuffer();
     }
 
-    Manager(Manager const& other) // NOT a copy constructor!
+    Manager(Manager const& other)         // NOT a copy constructor!
     {
         m_pre_init_buffer = ByteBuffer(); // will not be used
         initialize(other.m_kind);

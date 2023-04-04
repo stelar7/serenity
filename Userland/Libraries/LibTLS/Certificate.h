@@ -15,6 +15,7 @@
 #include <LibCore/DateTime.h>
 #include <LibCrypto/BigInt/UnsignedBigInteger.h>
 #include <LibCrypto/PK/RSA.h>
+#include <LibTLS/CipherSuite.h>
 
 namespace TLS {
 
@@ -211,18 +212,49 @@ struct Validity {
     Core::DateTime not_after;
 };
 
+class AlgorithmIdentifier {
+public:
+    AlgorithmIdentifier()
+    {
+    }
+
+    AlgorithmIdentifier(Array<int, 9> identifier)
+        : identifier(identifier)
+    {
+    }
+
+    Vector<int> identifier {};
+    // TODO: add PBKDF2Parameters to parameters
+    // TODO: add PBES2Parameters to parameters
+    AK::Variant<Empty, NamedCurve, ByteBuffer> parameters;
+};
+
+class PBES2Parameters {
+public:
+    AlgorithmIdentifier key_derivation_function;
+    AlgorithmIdentifier encryption_scheme;
+};
+
+class PBKDF2Parameters {
+public:
+    AK::Variant<Empty, ByteBuffer, Vector<int>> salt;
+    u32 iteration_count {};
+    u32 key_length {};
+    AlgorithmIdentifier prf;
+};
+
 class SubjectPublicKey {
 public:
     Crypto::PK::RSAPublicKey<Crypto::UnsignedBigInteger> rsa;
 
-    CertificateKeyAlgorithm algorithm { CertificateKeyAlgorithm::Unsupported };
+    AlgorithmIdentifier algorithm {};
     ByteBuffer raw_key;
 };
 
 class Certificate {
 public:
     u16 version { 0 };
-    CertificateKeyAlgorithm algorithm { CertificateKeyAlgorithm::Unsupported };
+    AlgorithmIdentifier algorithm {};
     CertificateKeyAlgorithm ec_algorithm { CertificateKeyAlgorithm::Unsupported };
     SubjectPublicKey public_key {};
     ByteBuffer exponent {};
@@ -237,7 +269,7 @@ public:
     ByteBuffer fingerprint {};
     ByteBuffer der {};
     ByteBuffer data {};
-    CertificateKeyAlgorithm signature_algorithm { CertificateKeyAlgorithm::Unsupported };
+    AlgorithmIdentifier signature_algorithm {};
     ByteBuffer signature_value {};
     ByteBuffer original_asn1 {};
     bool is_allowed_to_sign_certificate { false };
@@ -247,6 +279,7 @@ public:
 
     static ErrorOr<Certificate> parse_certificate(ReadonlyBytes, bool client_cert = false);
     static ErrorOr<Crypto::PK::RSAPrivateKey<Crypto::UnsignedBigInteger>> parse_private_key(ReadonlyBytes);
+    static ErrorOr<Crypto::PK::RSAPrivateKey<Crypto::UnsignedBigInteger>> parse_encrypted_private_key(ReadonlyBytes);
 
     bool is_self_signed();
     bool is_valid() const;

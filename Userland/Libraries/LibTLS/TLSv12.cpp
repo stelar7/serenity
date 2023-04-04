@@ -340,22 +340,25 @@ bool Context::verify_chain(StringView host) const
 
 bool Context::verify_certificate_pair(Certificate const& subject, Certificate const& issuer) const
 {
-    Crypto::Hash::HashKind kind;
-    switch (subject.signature_algorithm) {
-    case CertificateKeyAlgorithm::RSA_SHA1:
-        kind = Crypto::Hash::HashKind::SHA1;
-        break;
-    case CertificateKeyAlgorithm::RSA_SHA256:
-        kind = Crypto::Hash::HashKind::SHA256;
-        break;
-    case CertificateKeyAlgorithm::RSA_SHA384:
-        kind = Crypto::Hash::HashKind::SHA384;
-        break;
-    case CertificateKeyAlgorithm::RSA_SHA512:
-        kind = Crypto::Hash::HashKind::SHA512;
-        break;
-    default:
-        dbgln("verify_certificate_pair: Unknown signature algorithm, expected RSA with SHA1/256/384/512, got {}", (u8)subject.signature_algorithm);
+    Crypto::Hash::HashKind kind = Crypto::Hash::HashKind::Unknown;
+
+    auto identifier = subject.signature_algorithm.identifier;
+
+#define ENUMERATE_ALGORITHMS                                    \
+    ALGO(rsa_none, None, ({ 1, 2, 840, 113549, 1, 1, 1 }))      \
+    ALGO(rsa_md5, MD5, ({ 1, 2, 840, 113549, 1, 1, 4 }))        \
+    ALGO(rsa_sha1, SHA1, ({ 1, 2, 840, 113549, 1, 1, 5 }))      \
+    ALGO(rsa_sha256, SHA256, ({ 1, 2, 840, 113549, 1, 1, 11 })) \
+    ALGO(rsa_sha384, SHA384, ({ 1, 2, 840, 113549, 1, 1, 12 })) \
+    ALGO(rsa_sha512, SHA512, ({ 1, 2, 840, 113549, 1, 1, 13 })) \
+    ALGO(rsa_sha224, SHA224, ({ 1, 2, 840, 113549, 1, 1, 14 }))
+
+#define ALGO(name, hash_kind, oid) \
+    if (identifier == oid)         \
+        kind = Crypto::Hash::HashKind::hash_kind;
+
+    if (kind == Crypto::Hash::HashKind::Unknown) {
+        dbgln("verify_certificate_pair: Unknown signature algorithm, expected RSA with SHA1/256/384/512, got oid {}", subject.signature_algorithm.identifier);
         return false;
     }
 
