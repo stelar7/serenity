@@ -246,6 +246,7 @@ public:
     bool is_self_issued { false };
 
     static ErrorOr<Certificate> parse_certificate(ReadonlyBytes, bool client_cert = false);
+    static ErrorOr<Crypto::PK::RSAPrivateKey<Crypto::UnsignedBigInteger>> parse_private_key(ReadonlyBytes);
 
     bool is_self_signed();
     bool is_valid() const;

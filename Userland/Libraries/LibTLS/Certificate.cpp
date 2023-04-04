@@ -839,6 +839,117 @@ ErrorOr<Certificate> Certificate::parse_certificate(ReadonlyBytes buffer, bool)
     return certificate;
 }
 
+static ErrorOr<Crypto::PK::RSAPrivateKey<Crypto::UnsignedBigInteger>> parse_rsa_private_key(Crypto::ASN1::Decoder& decoder, Vector<StringView> current_scope)
+{
+    // RSAPrivateKey ::= SEQUENCE {
+    //     version           Version,
+    //     modulus           INTEGER,  -- n
+    //     publicExponent    INTEGER,  -- e
+    //     privateExponent   INTEGER,  -- d
+    //     prime1            INTEGER,  -- p
+    //     prime2            INTEGER,  -- q
+    //     exponent1         INTEGER,  -- d mod (p-1)
+    //     exponent2         INTEGER,  -- d mod (q-1)
+    //     coefficient       INTEGER,  -- (inverse of q) mod p
+    //     otherPrimeInfos   OtherPrimeInfos OPTIONAL
+    // }
+
+    ENTER_TYPED_SCOPE(Sequence, "RSAPrivateKey"sv);
+
+    PUSH_SCOPE("version"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, version);
+    POP_SCOPE();
+
+    PUSH_SCOPE("modulus"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, modulus);
+    POP_SCOPE();
+
+    PUSH_SCOPE("publicExponent"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, public_exponent);
+    POP_SCOPE();
+
+    PUSH_SCOPE("privateExponent"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, private_exponent);
+    POP_SCOPE();
+
+    PUSH_SCOPE("prime1"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, prime1);
+    POP_SCOPE();
+
+    PUSH_SCOPE("prime2"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, prime2);
+    POP_SCOPE();
+
+    PUSH_SCOPE("exponent1"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, exponent1);
+    POP_SCOPE();
+
+    PUSH_SCOPE("exponent2"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, exponent2);
+    POP_SCOPE();
+
+    PUSH_SCOPE("coefficient"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, coefficient);
+    POP_SCOPE();
+
+    if (!decoder.eof() && version.to_u64() == 0) {
+        return Error::from_string_view("otherPrimeInfos SHALL be omitted if version is 0"sv);
+    }
+
+    if (decoder.eof() && version.to_u64() == 1) {
+        return Error::from_string_view("otherPrimeInfos SHALL contain at least one instance of OtherPrimeInfo if version is 1"sv);
+    }
+
+    if (!decoder.eof()) {
+        return Error::from_string_view("otherPrimeInfos is unhandled"sv);
+    }
+
+    EXIT_SCOPE();
+
+    return Crypto::PK::RSAPrivateKey(modulus, private_exponent, public_exponent);
+}
+
+ErrorOr<Crypto::PK::RSAPrivateKey<Crypto::UnsignedBigInteger>> Certificate::parse_private_key(ReadonlyBytes buffer)
+{
+    Crypto::ASN1::Decoder decoder { buffer };
+    Vector<StringView, 8> current_scope {};
+
+    // PrivateKeyInfo ::= SEQUENCE {
+    //     version                   Version,
+    //     privateKeyAlgorithm       PrivateKeyAlgorithmIdentifier,
+    //     privateKey                PrivateKey,
+    //     attributes           [0]  IMPLICIT Attributes OPTIONAL
+    // }
+
+    // Version ::= INTEGER
+    // PrivateKeyAlgorithmIdentifier ::= AlgorithmIdentifier
+    // PrivateKey ::= OCTET STRING
+    // Attributes ::= SET OF Attribute
+
+    ENTER_TYPED_SCOPE(Sequence, "PrivateKeyInfo"sv);
+
+    PUSH_SCOPE("version"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, version);
+    POP_SCOPE();
+
+    auto identifier = TRY(parse_algorithm_identifier(decoder, current_scope));
+
+    PUSH_SCOPE("privateKey"sv);
+    READ_OBJECT(OctetString, StringView, private_key);
+    POP_SCOPE();
+
+    if (identifier != CertificateKeyAlgorithm::RSA_RSA) {
+        return Error::from_string_view(TRY(String::formatted("Unable to decode algorithm {}"sv, static_cast<u8>(identifier))));
+    }
+
+    Crypto::ASN1::Decoder key_decoder { private_key.bytes() };
+    auto key = TRY(parse_rsa_private_key(key_decoder, current_scope));
+
+    EXIT_SCOPE();
+
+    return key;
+}
+
 #undef PUSH_SCOPE
 #undef ENTER_SCOPE
 #undef ENTER_TYPED_SCOPE
