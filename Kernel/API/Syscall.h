@@ -84,6 +84,7 @@ enum class NeedsBigProcessLock {
     S(fsync, NeedsBigProcessLock::No)                      \
     S(ftruncate, NeedsBigProcessLock::No)                  \
     S(futex, NeedsBigProcessLock::Yes)                     \
+    S(futimens, NeedsBigProcessLock::No)                   \
     S(get_dir_entries, NeedsBigProcessLock::Yes)           \
     S(get_root_session_id, NeedsBigProcessLock::No)        \
     S(get_stack_bounds, NeedsBigProcessLock::No)           \
@@ -121,16 +122,16 @@ enum class NeedsBigProcessLock {
     S(link, NeedsBigProcessLock::No)                       \
     S(listen, NeedsBigProcessLock::No)                     \
     S(lseek, NeedsBigProcessLock::No)                      \
-    S(madvise, NeedsBigProcessLock::Yes)                   \
-    S(map_time_page, NeedsBigProcessLock::Yes)             \
+    S(madvise, NeedsBigProcessLock::No)                    \
+    S(map_time_page, NeedsBigProcessLock::No)              \
     S(mkdir, NeedsBigProcessLock::No)                      \
     S(mknod, NeedsBigProcessLock::No)                      \
-    S(mmap, NeedsBigProcessLock::Yes)                      \
+    S(mmap, NeedsBigProcessLock::No)                       \
     S(mount, NeedsBigProcessLock::Yes)                     \
-    S(mprotect, NeedsBigProcessLock::Yes)                  \
-    S(mremap, NeedsBigProcessLock::Yes)                    \
-    S(msync, NeedsBigProcessLock::Yes)                     \
-    S(munmap, NeedsBigProcessLock::Yes)                    \
+    S(mprotect, NeedsBigProcessLock::No)                   \
+    S(mremap, NeedsBigProcessLock::No)                     \
+    S(msync, NeedsBigProcessLock::No)                      \
+    S(munmap, NeedsBigProcessLock::No)                     \
     S(open, NeedsBigProcessLock::No)                       \
     S(perf_event, NeedsBigProcessLock::Yes)                \
     S(perf_register_string, NeedsBigProcessLock::Yes)      \
@@ -157,7 +158,7 @@ enum class NeedsBigProcessLock {
     S(scheduler_set_parameters, NeedsBigProcessLock::No)   \
     S(sendfd, NeedsBigProcessLock::No)                     \
     S(sendmsg, NeedsBigProcessLock::Yes)                   \
-    S(set_mmap_name, NeedsBigProcessLock::Yes)             \
+    S(set_mmap_name, NeedsBigProcessLock::No)              \
     S(set_thread_name, NeedsBigProcessLock::No)            \
     S(setegid, NeedsBigProcessLock::No)                    \
     S(seteuid, NeedsBigProcessLock::No)                    \
@@ -455,6 +456,11 @@ struct SC_utimensat_params {
     StringArgument path;
     struct timespec const* times;
     int flag;
+};
+
+struct SC_futimens_params {
+    int fd;
+    struct timespec const* times;
 };
 
 struct SC_waitid_params {

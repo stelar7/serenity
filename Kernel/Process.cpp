@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018-2023, Andreas Kling <kling@serenityos.org>
+ * Copyright (c) 2023, Timon Kruiper <timonkruiper@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -286,20 +287,22 @@ void Process::unprotect_data()
 
 ErrorOr<Process::ProcessAndFirstThread> Process::create(NonnullOwnPtr<KString> name, UserID uid, GroupID gid, ProcessID ppid, bool is_kernel_process, RefPtr<Custody> current_directory, RefPtr<Custody> executable, RefPtr<TTY> tty, Process* fork_parent)
 {
-    OwnPtr<Memory::AddressSpace> new_address_space;
-    if (fork_parent) {
-        TRY(fork_parent->address_space().with([&](auto& parent_address_space) -> ErrorOr<void> {
-            new_address_space = TRY(Memory::AddressSpace::try_create(parent_address_space.ptr()));
-            return {};
-        }));
-    } else {
-        new_address_space = TRY(Memory::AddressSpace::try_create(nullptr));
-    }
     auto unveil_tree = UnveilNode { TRY(KString::try_create("/"sv)), UnveilMetadata(TRY(KString::try_create("/"sv))) };
     auto exec_unveil_tree = UnveilNode { TRY(KString::try_create("/"sv)), UnveilMetadata(TRY(KString::try_create("/"sv))) };
     auto credentials = TRY(Credentials::create(uid, gid, uid, gid, uid, gid, {}, fork_parent ? fork_parent->sid() : 0, fork_parent ? fork_parent->pgid() : 0));
 
     auto process = TRY(adopt_nonnull_ref_or_enomem(new (nothrow) Process(move(name), move(credentials), ppid, is_kernel_process, move(current_directory), move(executable), tty, move(unveil_tree), move(exec_unveil_tree))));
+
+    OwnPtr<Memory::AddressSpace> new_address_space;
+    if (fork_parent) {
+        TRY(fork_parent->address_space().with([&](auto& parent_address_space) -> ErrorOr<void> {
+            new_address_space = TRY(Memory::AddressSpace::try_create(*process, parent_address_space.ptr()));
+            return {};
+        }));
+    } else {
+        new_address_space = TRY(Memory::AddressSpace::try_create(*process, nullptr));
+    }
+
     auto first_thread = TRY(process->attach_resources(new_address_space.release_nonnull(), fork_parent));
 
     return ProcessAndFirstThread { move(process), move(first_thread) };
@@ -409,14 +412,36 @@ void signal_trampoline_dummy()
         : "i"(Syscall::SC_sigreturn),
         "i"(offset_to_first_register_slot));
 #elif ARCH(AARCH64)
+    constexpr static auto offset_to_first_register_slot = align_up_to(sizeof(__ucontext) + sizeof(siginfo) + sizeof(FPUState) + 3 * sizeof(FlatPtr), 16);
     asm(
         ".global asm_signal_trampoline\n"
         "asm_signal_trampoline:\n"
-        // TODO: Implement this when we support userspace for aarch64
-        "wfi\n"
+        // stack state: 0, ucontext, signal_info (alignment = 16), fpu_state (alignment = 16), ucontext*, siginfo*, signal, handler
+
+        // Load the handler address into x3.
+        "ldr x3, [sp, #0]\n"
+        // Store x0 (return value from a syscall) into the register slot, such that we can return the correct value in sys$sigreturn.
+        "str x0, [sp, %[offset_to_first_register_slot]]\n"
+        // Load the signal number into the first argument.
+        "ldr x0, [sp, #8]\n"
+        // Load a pointer to the signal_info structure into the second argument.
+        "ldr x1, [sp, #16]\n"
+        // Load a pointer to the ucontext into the third argument.
+        "ldr x2, [sp, #24]\n"
+        // Pop the values off the stack.
+        "add sp, sp, 32\n"
+        // Call the signal handler.
+        "blr x3\n"
+
+        // Call sys$sigreturn.
+        "mov x8, %[sigreturn_syscall_number]\n"
+        "svc #0\n"
+        // We should never return, so trap if we do return.
+        "brk #0\n"
         "\n"
         ".global asm_signal_trampoline_end\n"
-        "asm_signal_trampoline_end: \n");
+        "asm_signal_trampoline_end: \n" ::[sigreturn_syscall_number] "i"(Syscall::SC_sigreturn),
+        [offset_to_first_register_slot] "i"(offset_to_first_register_slot));
 #else
 #    error Unknown architecture
 #endif
@@ -760,13 +785,6 @@ void Process::finalize()
     m_fds.with_exclusive([](auto& fds) { fds.clear(); });
     with_mutable_protected_data([&](auto& protected_data) { protected_data.tty = nullptr; });
     m_executable.with([](auto& executable) { executable = nullptr; });
-    m_jail_process_list.with([this](auto& list_ptr) {
-        if (list_ptr) {
-            list_ptr->attached_processes().with([&](auto& list) {
-                list.remove(*this);
-            });
-        }
-    });
     m_attached_jail.with([](auto& jail) {
         if (jail)
             jail->detach({});
@@ -818,6 +836,17 @@ void Process::unblock_waiters(Thread::WaitBlocker::UnblockFlags flags, u8 signal
 
     if (waiter_process)
         waiter_process->m_wait_blocker_set.unblock(*this, flags, signal);
+}
+
+void Process::remove_from_secondary_lists()
+{
+    m_jail_process_list.with([this](auto& list_ptr) {
+        if (list_ptr) {
+            list_ptr->attached_processes().with([&](auto& list) {
+                list.remove(*this);
+            });
+        }
+    });
 }
 
 void Process::die()

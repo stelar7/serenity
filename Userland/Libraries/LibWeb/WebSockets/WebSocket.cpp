@@ -222,7 +222,7 @@ void WebSocket::on_close(u16 code, DeprecatedString reason, bool was_clean)
     event_init.was_clean = was_clean;
     event_init.code = code;
     event_init.reason = String::from_deprecated_string(reason).release_value_but_fixme_should_propagate_errors();
-    dispatch_event(HTML::CloseEvent::create(realm(), String::from_deprecated_string(HTML::EventNames::close.view()).release_value_but_fixme_should_propagate_errors(), event_init).release_value_but_fixme_should_propagate_errors());
+    dispatch_event(HTML::CloseEvent::create(realm(), HTML::EventNames::close, event_init).release_value_but_fixme_should_propagate_errors());
 }
 
 // https://websockets.spec.whatwg.org/#feedback-from-the-protocol
@@ -235,7 +235,7 @@ void WebSocket::on_message(ByteBuffer message, bool is_text)
         HTML::MessageEventInit event_init;
         event_init.data = JS::PrimitiveString::create(vm(), text_message);
         event_init.origin = String::from_deprecated_string(url()).release_value_but_fixme_should_propagate_errors();
-        dispatch_event(HTML::MessageEvent::create(realm(), String::from_deprecated_string(HTML::EventNames::message).release_value_but_fixme_should_propagate_errors(), event_init).release_value_but_fixme_should_propagate_errors());
+        dispatch_event(HTML::MessageEvent::create(realm(), HTML::EventNames::message, event_init).release_value_but_fixme_should_propagate_errors());
         return;
     }
 
@@ -247,7 +247,7 @@ void WebSocket::on_message(ByteBuffer message, bool is_text)
         HTML::MessageEventInit event_init;
         event_init.data = JS::ArrayBuffer::create(realm(), message);
         event_init.origin = String::from_deprecated_string(url()).release_value_but_fixme_should_propagate_errors();
-        dispatch_event(HTML::MessageEvent::create(realm(), String::from_deprecated_string(HTML::EventNames::message).release_value_but_fixme_should_propagate_errors(), event_init).release_value_but_fixme_should_propagate_errors());
+        dispatch_event(HTML::MessageEvent::create(realm(), HTML::EventNames::message, event_init).release_value_but_fixme_should_propagate_errors());
         return;
     }
 

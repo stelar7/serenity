@@ -61,7 +61,7 @@ struct [[gnu::packed]] XzStreamHeader {
     XzStreamFlags flags;
     LittleEndian<u32> flags_crc32;
 
-    ErrorOr<void> validate();
+    ErrorOr<void> validate() const;
 };
 static_assert(sizeof(XzStreamHeader) == 12);
 
@@ -72,8 +72,8 @@ struct [[gnu::packed]] XzStreamFooter {
     XzStreamFlags flags;
     u8 magic[2];
 
-    ErrorOr<void> validate();
-    u32 backward_size();
+    ErrorOr<void> validate() const;
+    u32 backward_size() const;
 };
 static_assert(sizeof(XzStreamFooter) == 12);
 
@@ -84,7 +84,7 @@ struct [[gnu::packed]] XzBlockFlags {
     bool compressed_size_present : 1;
     bool uncompressed_size_present : 1;
 
-    u8 number_of_filters();
+    u8 number_of_filters() const;
 };
 static_assert(sizeof(XzBlockFlags) == 1);
 
@@ -93,8 +93,8 @@ struct [[gnu::packed]] XzFilterLzma2Properties {
     u8 encoded_dictionary_size : 6;
     u8 reserved : 2;
 
-    ErrorOr<void> validate();
-    u32 dictionary_size();
+    ErrorOr<void> validate() const;
+    u32 dictionary_size() const;
 };
 static_assert(sizeof(XzFilterLzma2Properties) == 1);
 
@@ -110,6 +110,11 @@ public:
 
 private:
     XzDecompressor(NonnullOwnPtr<CountingStream>);
+
+    ErrorOr<bool> load_next_stream();
+    ErrorOr<void> load_next_block(u8 encoded_block_header_size);
+    ErrorOr<void> finish_current_block();
+    ErrorOr<void> finish_current_stream();
 
     NonnullOwnPtr<CountingStream> m_stream;
     Optional<XzStreamFlags> m_stream_flags;

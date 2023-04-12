@@ -302,6 +302,18 @@ TEST_CASE(test_webp_simple_lossless)
     EXPECT(!plugin_decoder->loop_count());
 
     EXPECT_EQ(plugin_decoder->size(), Gfx::IntSize(386, 395));
+
+    // Ironically, simple-vp8l.webp is a much more complex file than extended-lossless.webp tested below.
+    // extended-lossless.webp tests the decoding basics.
+    // This here tests the predictor, color, and subtract green transforms,
+    // as well as meta prefix images, one-element canonical code handling,
+    // and handling of canonical codes with more than 288 elements.
+    // This image uses all 13 predictor modes of the predictor transform.
+    auto frame = MUST(plugin_decoder->frame(0));
+    EXPECT_EQ(frame.image->size(), Gfx::IntSize(386, 395));
+
+    // This pixel tests all predictor modes except 5, 7, 8, 9, and 13.
+    EXPECT_EQ(frame.image->get_pixel(289, 332), Gfx::Color(0xf2, 0xee, 0xd3, 255));
 }
 
 TEST_CASE(test_webp_extended_lossy)
@@ -346,6 +358,87 @@ TEST_CASE(test_webp_extended_lossless)
     EXPECT_EQ(frame.image->get_pixel(176, 115), Gfx::Color(0, 255, 0, 255));
     EXPECT_EQ(frame.image->get_pixel(290, 89), Gfx::Color(0, 0, 255, 255));
     EXPECT_EQ(frame.image->get_pixel(359, 73), Gfx::Color(0, 0, 0, 128));
+}
+
+TEST_CASE(test_webp_simple_lossless_color_index_transform)
+{
+    // In addition to testing the index transform, this file also tests handling of explicity setting max_symbol.
+    auto file = MUST(Core::MappedFile::map(TEST_INPUT("Qpalette.webp"sv)));
+    EXPECT(Gfx::WebPImageDecoderPlugin::sniff(file->bytes()));
+    auto plugin_decoder = MUST(Gfx::WebPImageDecoderPlugin::create(file->bytes()));
+    EXPECT(plugin_decoder->initialize());
+
+    EXPECT_EQ(plugin_decoder->frame_count(), 1u);
+    EXPECT(!plugin_decoder->is_animated());
+    EXPECT(!plugin_decoder->loop_count());
+
+    EXPECT_EQ(plugin_decoder->size(), Gfx::IntSize(256, 256));
+
+    auto frame = MUST(plugin_decoder->frame(0));
+    EXPECT_EQ(frame.image->size(), Gfx::IntSize(256, 256));
+
+    EXPECT_EQ(frame.image->get_pixel(100, 100), Gfx::Color(0x73, 0x37, 0x23, 0xff));
+}
+
+TEST_CASE(test_webp_simple_lossless_color_index_transform_pixel_bundling)
+{
+    struct TestCase {
+        StringView file_name;
+        Gfx::Color line_color;
+        Gfx::Color background_color;
+    };
+
+    // The number after the dash is the number of colors in each file's color index bitmap.
+    // catdog-alert-2 tests the 1-bit-per-pixel case,
+    // catdog-alert-3 tests the 2-bit-per-pixel case,
+    // catdog-alert-8 and catdog-alert-13 both test the 4-bits-per-pixel case.
+    TestCase test_cases[] = {
+        { "catdog-alert-2.webp"sv, Gfx::Color(0x35, 0x12, 0x0a, 0xff), Gfx::Color(0xf3, 0xe6, 0xd8, 0xff) },
+        { "catdog-alert-3.webp"sv, Gfx::Color(0x35, 0x12, 0x0a, 0xff), Gfx::Color(0, 0, 0, 0) },
+        { "catdog-alert-8.webp"sv, Gfx::Color(0, 0, 0, 255), Gfx::Color(0, 0, 0, 0) },
+        { "catdog-alert-13.webp"sv, Gfx::Color(0, 0, 0, 255), Gfx::Color(0, 0, 0, 0) },
+    };
+
+    for (auto test_case : test_cases) {
+        auto file = MUST(Core::MappedFile::map(MUST(String::formatted("{}{}", TEST_INPUT(""), test_case.file_name))));
+        EXPECT(Gfx::WebPImageDecoderPlugin::sniff(file->bytes()));
+        auto plugin_decoder = MUST(Gfx::WebPImageDecoderPlugin::create(file->bytes()));
+        EXPECT(plugin_decoder->initialize());
+
+        EXPECT_EQ(plugin_decoder->frame_count(), 1u);
+        EXPECT_EQ(plugin_decoder->size(), Gfx::IntSize(32, 32));
+
+        auto frame = MUST(plugin_decoder->frame(0));
+        EXPECT_EQ(frame.image->size(), Gfx::IntSize(32, 32));
+
+        EXPECT_EQ(frame.image->get_pixel(4, 0), test_case.background_color);
+        EXPECT_EQ(frame.image->get_pixel(5, 0), test_case.line_color);
+
+        EXPECT_EQ(frame.image->get_pixel(9, 5), test_case.background_color);
+        EXPECT_EQ(frame.image->get_pixel(10, 5), test_case.line_color);
+        EXPECT_EQ(frame.image->get_pixel(11, 5), test_case.background_color);
+    }
+}
+
+TEST_CASE(test_webp_simple_lossless_color_index_transform_pixel_bundling_odd_width)
+{
+    StringView file_names[] = {
+        "width11-height11-colors2.webp"sv,
+        "width11-height11-colors3.webp"sv,
+        "width11-height11-colors15.webp"sv,
+    };
+
+    for (auto file_name : file_names) {
+        auto file = MUST(Core::MappedFile::map(MUST(String::formatted("{}{}", TEST_INPUT(""), file_name))));
+        auto plugin_decoder = MUST(Gfx::WebPImageDecoderPlugin::create(file->bytes()));
+        EXPECT(plugin_decoder->initialize());
+
+        EXPECT_EQ(plugin_decoder->frame_count(), 1u);
+        EXPECT_EQ(plugin_decoder->size(), Gfx::IntSize(11, 11));
+
+        auto frame = MUST(plugin_decoder->frame(0));
+        EXPECT_EQ(frame.image->size(), Gfx::IntSize(11, 11));
+    }
 }
 
 TEST_CASE(test_webp_extended_lossless_animated)

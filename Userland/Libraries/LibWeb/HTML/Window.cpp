@@ -567,14 +567,14 @@ Optional<CSS::MediaFeatureValue> Window::query_media_feature(CSS::MediaFeatureID
 }
 
 // https://html.spec.whatwg.org/#fire-a-page-transition-event
-void Window::fire_a_page_transition_event(DeprecatedFlyString const& event_name, bool persisted)
+void Window::fire_a_page_transition_event(FlyString const& event_name, bool persisted)
 {
     // To fire a page transition event named eventName at a Window window with a boolean persisted,
     // fire an event named eventName at window, using PageTransitionEvent,
     // with the persisted attribute initialized to persisted,
     PageTransitionEventInit event_init {};
     event_init.persisted = persisted;
-    auto event = PageTransitionEvent::create(associated_document().realm(), String::from_deprecated_string(event_name).release_value_but_fixme_should_propagate_errors(), event_init).release_value_but_fixme_should_propagate_errors();
+    auto event = PageTransitionEvent::create(associated_document().realm(), event_name, event_init).release_value_but_fixme_should_propagate_errors();
 
     // ...the cancelable attribute initialized to true,
     event->set_cancelable(true);
@@ -968,7 +968,7 @@ void Window::post_message(JS::Value message, String const&)
         MessageEventInit event_init {};
         event_init.data = message;
         event_init.origin = "<origin>"_string.release_value_but_fixme_should_propagate_errors();
-        dispatch_event(MessageEvent::create(realm(), String::from_deprecated_string(EventNames::message).release_value_but_fixme_should_propagate_errors(), event_init).release_value_but_fixme_should_propagate_errors());
+        dispatch_event(MessageEvent::create(realm(), EventNames::message, event_init).release_value_but_fixme_should_propagate_errors());
     });
 }
 

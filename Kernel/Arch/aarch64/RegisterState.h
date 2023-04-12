@@ -24,14 +24,12 @@ struct RegisterState {
     FlatPtr userspace_sp() const { return sp_el0; }
     void set_userspace_sp(FlatPtr value)
     {
-        (void)value;
-        TODO_AARCH64();
+        sp_el0 = value;
     }
     FlatPtr ip() const { return elr_el1; }
     void set_ip(FlatPtr value)
     {
-        (void)value;
-        TODO_AARCH64();
+        elr_el1 = value;
     }
     FlatPtr bp() const { return x[29]; }
 
@@ -56,16 +54,20 @@ static_assert(AssertSize<RegisterState, REGISTER_STATE_SIZE>());
 
 inline void copy_kernel_registers_into_ptrace_registers(PtraceRegisters& ptrace_regs, RegisterState const& kernel_regs)
 {
-    (void)ptrace_regs;
-    (void)kernel_regs;
-    TODO_AARCH64();
+    for (auto i = 0; i < 31; i++)
+        ptrace_regs.x[i] = kernel_regs.x[i];
+
+    ptrace_regs.sp = kernel_regs.userspace_sp();
+    ptrace_regs.pc = kernel_regs.ip();
 }
 
 inline void copy_ptrace_registers_into_kernel_registers(RegisterState& kernel_regs, PtraceRegisters const& ptrace_regs)
 {
-    (void)kernel_regs;
-    (void)ptrace_regs;
-    TODO_AARCH64();
+    for (auto i = 0; i < 31; i++)
+        kernel_regs.x[i] = ptrace_regs.x[i];
+
+    kernel_regs.set_userspace_sp(ptrace_regs.sp);
+    kernel_regs.set_ip(ptrace_regs.pc);
 }
 
 struct DebugRegisterState {

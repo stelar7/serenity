@@ -204,6 +204,8 @@ public:
 
     ~Process();
 
+    virtual void remove_from_secondary_lists();
+
     ErrorOr<NonnullRefPtr<Thread>> create_kernel_thread(void (*entry)(void*), void* entry_data, u32 priority, NonnullOwnPtr<KString> name, u32 affinity = THREAD_AFFINITY_DEFAULT, bool joinable = true);
 
     bool is_profiling() const { return m_profiling; }
@@ -332,6 +334,7 @@ public:
     ErrorOr<FlatPtr> sys$annotate_mapping(Userspace<void*>, int flags);
     ErrorOr<FlatPtr> sys$lseek(int fd, Userspace<off_t*>, int whence);
     ErrorOr<FlatPtr> sys$ftruncate(int fd, Userspace<off_t const*>);
+    ErrorOr<FlatPtr> sys$futimens(Userspace<Syscall::SC_futimens_params const*>);
     ErrorOr<FlatPtr> sys$posix_fallocate(int fd, Userspace<off_t const*>, Userspace<off_t const*>);
     ErrorOr<FlatPtr> sys$kill(pid_t pid_or_pgid, int sig);
     [[noreturn]] void sys$exit(int status);
@@ -485,7 +488,7 @@ public:
 
     ErrorOr<void> exec(NonnullOwnPtr<KString> path, Vector<NonnullOwnPtr<KString>> arguments, Vector<NonnullOwnPtr<KString>> environment, Thread*& new_main_thread, InterruptsState& previous_interrupts_state, int recursion_depth = 0);
 
-    ErrorOr<LoadResult> load(NonnullRefPtr<OpenFileDescription> main_program_description, RefPtr<OpenFileDescription> interpreter_description, const ElfW(Ehdr) & main_program_header);
+    ErrorOr<LoadResult> load(Memory::AddressSpace& new_space, NonnullRefPtr<OpenFileDescription> main_program_description, RefPtr<OpenFileDescription> interpreter_description, const ElfW(Ehdr) & main_program_header);
 
     void terminate_due_to_signal(u8 signal);
     ErrorOr<void> send_signal(u8 signal, Process* sender);

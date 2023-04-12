@@ -106,7 +106,7 @@ public:
 
     Optional<CSS::MediaFeatureValue> query_media_feature(CSS::MediaFeatureID) const;
 
-    void fire_a_page_transition_event(DeprecatedFlyString const& event_name, bool persisted);
+    void fire_a_page_transition_event(FlyString const& event_name, bool persisted);
 
     WebIDL::ExceptionOr<JS::NonnullGCPtr<Storage>> local_storage();
     WebIDL::ExceptionOr<JS::NonnullGCPtr<Storage>> session_storage();
@@ -194,7 +194,7 @@ private:
     virtual void visit_edges(Cell::Visitor&) override;
 
     // ^HTML::GlobalEventHandlers
-    virtual DOM::EventTarget& global_event_handlers_to_event_target(DeprecatedFlyString const&) override { return *this; }
+    virtual DOM::EventTarget& global_event_handlers_to_event_target(FlyString const&) override { return *this; }
 
     // ^HTML::WindowEventHandlers
     virtual DOM::EventTarget& window_event_handlers_to_event_target() override { return *this; }

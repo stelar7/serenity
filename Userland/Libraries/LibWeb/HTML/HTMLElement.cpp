@@ -245,9 +245,9 @@ void HTMLElement::parse_attribute(DeprecatedFlyString const& name, DeprecatedStr
     // 1. If namespace is not null, or localName is not the name of an event handler content attribute on element, then return.
     // FIXME: Add the namespace part once we support attribute namespaces.
 #undef __ENUMERATE
-#define __ENUMERATE(attribute_name, event_name)                     \
-    if (name == HTML::AttributeNames::attribute_name) {             \
-        element_event_handler_attribute_changed(event_name, value); \
+#define __ENUMERATE(attribute_name, event_name)                                                                     \
+    if (name == HTML::AttributeNames::attribute_name) {                                                             \
+        element_event_handler_attribute_changed(event_name, String::from_deprecated_string(value).release_value()); \
     }
     ENUMERATE_GLOBAL_EVENT_HANDLERS(__ENUMERATE)
 #undef __ENUMERATE
@@ -276,7 +276,7 @@ void HTMLElement::focus()
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#fire-a-synthetic-pointer-event
-bool HTMLElement::fire_a_synthetic_pointer_event(DeprecatedFlyString const& type, DOM::Element& target, bool not_trusted)
+bool HTMLElement::fire_a_synthetic_pointer_event(FlyString const& type, DOM::Element& target, bool not_trusted)
 {
     // 1. Let event be the result of creating an event using PointerEvent.
     // 2. Initialize event's type attribute to e.

@@ -30,15 +30,15 @@ void HTMLFrameSetElement::parse_attribute(DeprecatedFlyString const& name, Depre
     HTMLElement::parse_attribute(name, value);
 
 #undef __ENUMERATE
-#define __ENUMERATE(attribute_name, event_name)                     \
-    if (name == HTML::AttributeNames::attribute_name) {             \
-        element_event_handler_attribute_changed(event_name, value); \
+#define __ENUMERATE(attribute_name, event_name)                                                                     \
+    if (name == HTML::AttributeNames::attribute_name) {                                                             \
+        element_event_handler_attribute_changed(event_name, String::from_deprecated_string(value).release_value()); \
     }
     ENUMERATE_WINDOW_EVENT_HANDLERS(__ENUMERATE)
 #undef __ENUMERATE
 }
 
-DOM::EventTarget& HTMLFrameSetElement::global_event_handlers_to_event_target(DeprecatedFlyString const& event_name)
+DOM::EventTarget& HTMLFrameSetElement::global_event_handlers_to_event_target(FlyString const& event_name)
 {
     // NOTE: This is a little weird, but IIUC document.body.onload actually refers to window.onload
     // NOTE: document.body can return either a HTMLBodyElement or HTMLFrameSetElement, so both these elements must support this mapping.

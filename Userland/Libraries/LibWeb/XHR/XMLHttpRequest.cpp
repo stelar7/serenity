@@ -92,7 +92,7 @@ void XMLHttpRequest::visit_edges(Cell::Visitor& visitor)
 }
 
 // https://xhr.spec.whatwg.org/#concept-event-fire-progress
-static void fire_progress_event(XMLHttpRequestEventTarget& target, DeprecatedString const& event_name, u64 transmitted, u64 length)
+static void fire_progress_event(XMLHttpRequestEventTarget& target, FlyString const& event_name, u64 transmitted, u64 length)
 {
     // To fire a progress event named e at target, given transmitted and length, means to fire an event named e at target, using ProgressEvent,
     // with the loaded attribute initialized to transmitted, and if length is not 0, with the lengthComputable attribute initialized to true
@@ -102,7 +102,7 @@ static void fire_progress_event(XMLHttpRequestEventTarget& target, DeprecatedStr
     event_init.loaded = transmitted;
     event_init.total = length;
     // FIXME: If we're in an async context, this will propagate to a callback context which can't propagate it anywhere else and does not expect this to fail.
-    target.dispatch_event(*ProgressEvent::create(target.realm(), String::from_deprecated_string(event_name).release_value_but_fixme_should_propagate_errors(), event_init).release_value_but_fixme_should_propagate_errors());
+    target.dispatch_event(*ProgressEvent::create(target.realm(), event_name, event_init).release_value_but_fixme_should_propagate_errors());
 }
 
 // https://xhr.spec.whatwg.org/#dom-xmlhttprequest-responsetext
@@ -277,7 +277,7 @@ ErrorOr<MimeSniff::MimeType> XMLHttpRequest::get_response_mime_type() const
 ErrorOr<Optional<StringView>> XMLHttpRequest::get_final_encoding() const
 {
     // 1. Let label be null.
-    Optional<DeprecatedString> label;
+    Optional<String> label;
 
     // 2. Let responseMIME be the result of get a response MIME type for xhr.
     auto response_mime = TRY(get_response_mime_type());
@@ -285,13 +285,13 @@ ErrorOr<Optional<StringView>> XMLHttpRequest::get_final_encoding() const
     // 3. If responseMIME’s parameters["charset"] exists, then set label to it.
     auto response_mime_charset_it = response_mime.parameters().find("charset"sv);
     if (response_mime_charset_it != response_mime.parameters().end())
-        label = response_mime_charset_it->value.to_deprecated_string();
+        label = response_mime_charset_it->value;
 
     // 4. If xhr’s override MIME type’s parameters["charset"] exists, then set label to it.
     if (m_override_mime_type.has_value()) {
         auto override_mime_charset_it = m_override_mime_type->parameters().find("charset"sv);
         if (override_mime_charset_it != m_override_mime_type->parameters().end())
-            label = override_mime_charset_it->value.to_deprecated_string();
+            label = override_mime_charset_it->value;
     }
 
     // 5. If label is null, then return null.
@@ -1121,7 +1121,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::handle_errors()
     return {};
 }
 
-JS::ThrowCompletionOr<void> XMLHttpRequest::request_error_steps(DeprecatedFlyString const& event_name, JS::GCPtr<WebIDL::DOMException> exception)
+JS::ThrowCompletionOr<void> XMLHttpRequest::request_error_steps(FlyString const& event_name, JS::GCPtr<WebIDL::DOMException> exception)
 {
     // 1. Set xhr’s state to done.
     m_state = State::Done;

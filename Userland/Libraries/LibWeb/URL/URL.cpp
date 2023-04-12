@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021, Idan Horowitz <idan.horowitz@serenityos.org>
  * Copyright (c) 2021, the SerenityOS developers.
+ * Copyright (c) 2023, networkException <networkexception@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -18,37 +19,55 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<URL>> URL::create(JS::Realm& realm, AK::URL
     return MUST_OR_THROW_OOM(realm.heap().allocate<URL>(realm, realm, move(url), move(query)));
 }
 
+// https://url.spec.whatwg.org/#api-url-parser
+static Optional<AK::URL> parse_api_url(String const& url, Optional<String> const& base)
+{
+    // FIXME: We somewhat awkwardly have two failure states encapsulated in the return type (and convert between them in the steps),
+    //        ideally we'd get rid of URL's valid flag
+
+    // 1. Let parsedBase be null.
+    Optional<AK::URL> parsed_base;
+
+    // 2. If base is non-null:
+    if (base.has_value()) {
+        // 1. Set parsedBase to the result of running the basic URL parser on base.
+        auto parsed_base_url = URLParser::parse(*base);
+
+        // 2. If parsedBase is failure, then return failure.
+        if (!parsed_base_url.is_valid())
+            return {};
+
+        parsed_base = parsed_base_url;
+    }
+
+    // 3. Return the result of running the basic URL parser on url with parsedBase.
+    auto parsed = URLParser::parse(url, parsed_base);
+    return parsed.is_valid() ? parsed : Optional<AK::URL> {};
+}
+
+// https://url.spec.whatwg.org/#dom-url-url
 WebIDL::ExceptionOr<JS::NonnullGCPtr<URL>> URL::construct_impl(JS::Realm& realm, String const& url, Optional<String> const& base)
 {
     auto& vm = realm.vm();
 
-    // 1. Let parsedBase be null.
-    Optional<AK::URL> parsed_base;
-    // 2. If base is given, then:
-    if (base.has_value()) {
-        // 1. Let parsedBase be the result of running the basic URL parser on base.
-        parsed_base = base.value();
-        // 2. If parsedBase is failure, then throw a TypeError.
-        if (!parsed_base->is_valid())
-            return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid base URL"sv };
-    }
-    // 3. Let parsedURL be the result of running the basic URL parser on url with parsedBase.
-    AK::URL parsed_url;
-    if (parsed_base.has_value())
-        parsed_url = parsed_base->complete_url(url);
-    else
-        parsed_url = url;
-    // 4. If parsedURL is failure, then throw a TypeError.
-    if (!parsed_url.is_valid())
+    // 1. Let parsedURL be the result of running the API URL parser on url with base, if given.
+    auto parsed_url = parse_api_url(url, base);
+
+    // 2. If parsedURL is failure, then throw a TypeError.
+    if (!parsed_url.has_value())
         return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, "Invalid URL"sv };
-    // 5. Let query be parsedURL’s query, if that is non-null, and the empty string otherwise.
-    auto query = parsed_url.query().is_null() ? String {} : TRY_OR_THROW_OOM(vm, String::from_deprecated_string(parsed_url.query()));
-    // 6. Set this’s URL to parsedURL.
-    // 7. Set this’s query object to a new URLSearchParams object.
+
+    // 3. Let query be parsedURL’s query, if that is non-null, and the empty string otherwise.
+    auto query = parsed_url->query().is_null() ? String {} : TRY_OR_THROW_OOM(vm, String::from_deprecated_string(parsed_url->query()));
+
+    // 4. Set this’s URL to parsedURL.
+    // 5. Set this’s query object to a new URLSearchParams object.
     auto query_object = MUST(URLSearchParams::construct_impl(realm, query));
-    // 8. Initialize this’s query object with query.
-    auto result_url = TRY(URL::create(realm, move(parsed_url), move(query_object)));
-    // 9. Set this’s query object’s URL object to this.
+
+    // 6. Initialize this’s query object with query.
+    auto result_url = TRY(URL::create(realm, parsed_url.release_value(), move(query_object)));
+
+    // 7. Set this’s query object’s URL object to this.
     result_url->m_query->m_url = result_url;
 
     return result_url;
@@ -75,6 +94,20 @@ void URL::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(m_query.ptr());
+}
+
+// https://url.spec.whatwg.org/#dom-url-canparse
+bool URL::can_parse(JS::VM&, String const& url, Optional<String> const& base)
+{
+    // 1. Let parsedURL be the result of running the API URL parser on url with base, if given.
+    auto parsed_url = parse_api_url(url, base);
+
+    // 2. If parsedURL is failure, then return false.
+    if (!parsed_url.has_value())
+        return false;
+
+    // 3. Return true.
+    return true;
 }
 
 WebIDL::ExceptionOr<String> URL::href() const
@@ -135,7 +168,7 @@ WebIDL::ExceptionOr<void> URL::set_protocol(String const& protocol)
     auto& vm = realm().vm();
 
     // basic URL parse the given value, followed by U+003A (:), with this’s URL as url and scheme start state as state override.
-    auto result_url = URLParser::parse(TRY_OR_THROW_OOM(vm, String::formatted("{}:", protocol)), nullptr, m_url, URLParser::State::SchemeStart);
+    auto result_url = URLParser::parse(TRY_OR_THROW_OOM(vm, String::formatted("{}:", protocol)), {}, m_url, URLParser::State::SchemeStart);
     if (result_url.is_valid())
         m_url = move(result_url);
     return {};
@@ -197,7 +230,7 @@ void URL::set_host(String const& host)
     if (m_url.cannot_be_a_base_url())
         return;
     // 2. Basic URL parse the given value with this’s URL as url and host state as state override.
-    auto result_url = URLParser::parse(host, nullptr, m_url, URLParser::State::Host);
+    auto result_url = URLParser::parse(host, {}, m_url, URLParser::State::Host);
     if (result_url.is_valid())
         m_url = move(result_url);
 }
@@ -219,7 +252,7 @@ void URL::set_hostname(String const& hostname)
     if (m_url.cannot_be_a_base_url())
         return;
     // 2. Basic URL parse the given value with this’s URL as url and hostname state as state override.
-    auto result_url = URLParser::parse(hostname, nullptr, m_url, URLParser::State::Hostname);
+    auto result_url = URLParser::parse(hostname, {}, m_url, URLParser::State::Hostname);
     if (result_url.is_valid())
         m_url = move(result_url);
 }
@@ -249,7 +282,7 @@ void URL::set_port(String const& port)
     }
 
     // 3. Otherwise, basic URL parse the given value with this’s URL as url and port state as state override.
-    auto result_url = URLParser::parse(port, nullptr, m_url, URLParser::State::Port);
+    auto result_url = URLParser::parse(port, {}, m_url, URLParser::State::Port);
     if (result_url.is_valid())
         m_url = move(result_url);
 }
@@ -273,7 +306,7 @@ void URL::set_pathname(String const& pathname)
     auto url = m_url; // We copy the URL here to follow other browser's behaviour of reverting the path change if the parse failed.
     url.set_paths({});
     // 3. Basic URL parse the given value with this’s URL as url and path start state as state override.
-    auto result_url = URLParser::parse(pathname, nullptr, move(url), URLParser::State::PathStart);
+    auto result_url = URLParser::parse(pathname, {}, move(url), URLParser::State::PathStart);
     if (result_url.is_valid())
         m_url = move(result_url);
 }
@@ -308,7 +341,7 @@ WebIDL::ExceptionOr<void> URL::set_search(String const& search)
     auto url_copy = url; // We copy the URL here to follow other browser's behaviour of reverting the search change if the parse failed.
     url_copy.set_query(DeprecatedString::empty());
     // 4. Basic URL parse input with url as url and query state as state override.
-    auto result_url = URLParser::parse(input, nullptr, move(url_copy), URLParser::State::Query);
+    auto result_url = URLParser::parse(input, {}, move(url_copy), URLParser::State::Query);
     if (result_url.is_valid()) {
         m_url = move(result_url);
         // 5. Set this’s query object’s list to the result of parsing input.
@@ -348,7 +381,7 @@ void URL::set_hash(String const& hash)
     auto url = m_url; // We copy the URL here to follow other browser's behaviour of reverting the hash change if the parse failed.
     url.set_fragment(DeprecatedString::empty());
     // 4. Basic URL parse input with this’s URL as url and fragment state as state override.
-    auto result_url = URLParser::parse(input, nullptr, move(url), URLParser::State::Fragment);
+    auto result_url = URLParser::parse(input, {}, move(url), URLParser::State::Fragment);
     if (result_url.is_valid())
         m_url = move(result_url);
 }

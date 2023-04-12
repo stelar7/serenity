@@ -206,6 +206,7 @@ set(SOURCES
     HTML/BrowsingContextGroup.cpp
     HTML/Canvas/CanvasDrawImage.cpp
     HTML/Canvas/CanvasPath.cpp
+    HTML/Canvas/CanvasPathClipper.cpp
     HTML/Canvas/CanvasState.cpp
     HTML/CanvasGradient.cpp
     HTML/CanvasPattern.cpp
@@ -343,6 +344,9 @@ set(SOURCES
     HTML/TagNames.cpp
     HTML/TextMetrics.cpp
     HTML/Timer.cpp
+    HTML/TrackEvent.cpp
+    HTML/VideoTrack.cpp
+    HTML/VideoTrackList.cpp
     HTML/Window.cpp
     HTML/WindowEventHandlers.cpp
     HTML/WindowOrWorkerGlobalScope.cpp
@@ -402,6 +406,7 @@ set(SOURCES
     Layout/TableWrapper.cpp
     Layout/TextNode.cpp
     Layout/TreeBuilder.cpp
+    Layout/VideoBox.cpp
     Loader/ContentFilter.cpp
     Loader/FileRequest.cpp
     Loader/FrameLoader.cpp
@@ -443,6 +448,7 @@ set(SOURCES
     Painting/ShadowPainting.cpp
     Painting/StackingContext.cpp
     Painting/TextPaintable.cpp
+    Painting/VideoPaintable.cpp
     PerformanceTimeline/EntryTypes.cpp
     PerformanceTimeline/PerformanceEntry.cpp
     Platform/EventLoopPlugin.cpp
@@ -458,11 +464,17 @@ set(SOURCES
     ResizeObserver/ResizeObserver.cpp
     SecureContexts/AbstractOperations.cpp
     Streams/AbstractOperations.cpp
+    Streams/ReadableByteStreamController.cpp
     Streams/ReadableStream.cpp
+    Streams/ReadableStreamBYOBRequest.cpp
     Streams/ReadableStreamDefaultController.cpp
     Streams/ReadableStreamDefaultReader.cpp
     Streams/ReadableStreamGenericReader.cpp
+    Streams/UnderlyingSink.cpp
     Streams/UnderlyingSource.cpp
+    Streams/WritableStream.cpp
+    Streams/WritableStreamDefaultController.cpp
+    Streams/WritableStreamDefaultWriter.cpp
     SVG/AttributeNames.cpp
     SVG/AttributeParser.cpp
     SVG/SVGAnimatedLength.cpp
@@ -509,6 +521,7 @@ set(SOURCES
     WebDriver/Response.cpp
     WebDriver/Screenshot.cpp
     WebDriver/TimeoutsConfiguration.cpp
+    WebGL/EventNames.cpp
     WebGL/WebGLContextAttributes.cpp
     WebGL/WebGLContextEvent.cpp
     WebGL/WebGLRenderingContext.cpp
@@ -544,7 +557,7 @@ set(GENERATED_SOURCES
 serenity_lib(LibWeb web)
 
 # NOTE: We link with LibSoftGPU here instead of lazy loading it via dlopen() so that we do not have to unveil the library and pledge prot_exec.
-target_link_libraries(LibWeb PRIVATE LibCore LibCrypto LibJS LibMarkdown LibHTTP LibGemini LibGL LibGUI LibGfx LibIPC LibLocale LibRegex LibSoftGPU LibSyntax LibTextCodec LibUnicode LibWasm LibXML LibIDL)
+target_link_libraries(LibWeb PRIVATE LibCore LibCrypto LibJS LibMarkdown LibHTTP LibGemini LibGL LibGUI LibGfx LibIPC LibLocale LibRegex LibSoftGPU LibSyntax LibTextCodec LibUnicode LibVideo LibWasm LibXML LibIDL)
 link_with_locale_data(LibWeb)
 
 generate_js_bindings(LibWeb)

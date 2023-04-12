@@ -355,6 +355,9 @@ class Storage;
 class SubmitEvent;
 class TextMetrics;
 class Timer;
+class TrackEvent;
+class VideoTrack;
+class VideoTrackList;
 class Window;
 class WindowEnvironmentSettingsObject;
 class WindowProxy;
@@ -391,6 +394,7 @@ class PaintableBox;
 class PaintableWithLines;
 class StackingContext;
 class TextPaintable;
+class VideoPaintable;
 struct BorderRadiusData;
 struct BorderRadiiData;
 struct LinearGradientData;
@@ -422,11 +426,17 @@ class Selection;
 
 namespace Web::Streams {
 class ReadableStream;
+class ReadableByteStreamController;
+class ReadableStreamBYOBRequest;
 class ReadableStreamDefaultController;
 class ReadableStreamDefaultReader;
 class ReadableStreamGenericReaderMixin;
 class ReadRequest;
+struct UnderlyingSink;
 struct UnderlyingSource;
+class WritableStream;
+class WritableStreamDefaultController;
+class WritableStreamDefaultWriter;
 }
 
 namespace Web::SVG {
@@ -485,6 +495,7 @@ class RadioButton;
 class ReplacedBox;
 class TableWrapper;
 class TextNode;
+class VideoBox;
 }
 
 namespace Web {

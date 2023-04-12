@@ -1,4 +1,5 @@
 #import <HTML/HTMLElement.idl>
+#import <HTML/VideoTrackList.idl>
 
 enum CanPlayTypeResult {
     "",
@@ -10,14 +11,37 @@ enum CanPlayTypeResult {
 [Exposed=Window]
 interface HTMLMediaElement : HTMLElement {
 
+    // network state
     [Reflect, CEReactions] attribute DOMString src;
+    const unsigned short NETWORK_EMPTY = 0;
+    const unsigned short NETWORK_IDLE = 1;
+    const unsigned short NETWORK_LOADING = 2;
+    const unsigned short NETWORK_NO_SOURCE = 3;
+    readonly attribute unsigned short networkState;
+    undefined load();
+    CanPlayTypeResult canPlayType(DOMString type);
 
+    // ready state
+    const unsigned short HAVE_NOTHING = 0;
+    const unsigned short HAVE_METADATA = 1;
+    const unsigned short HAVE_CURRENT_DATA = 2;
+    const unsigned short HAVE_FUTURE_DATA = 3;
+    const unsigned short HAVE_ENOUGH_DATA = 4;
+    readonly attribute unsigned short readyState;
+
+    // playback state
+    attribute double currentTime;
+    readonly attribute unrestricted double duration;
+    readonly attribute boolean paused;
+    readonly attribute boolean ended;
     [Reflect, CEReactions] attribute boolean autoplay;
     [Reflect, CEReactions] attribute boolean loop;
+    Promise<undefined> play();
+    undefined pause();
 
+    // controls
     [Reflect, CEReactions] attribute boolean controls;
 
-    CanPlayTypeResult canPlayType(DOMString type);
-    undefined load();
-    undefined pause();
+    // tracks
+    [SameObject] readonly attribute VideoTrackList videoTracks;
 };

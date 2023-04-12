@@ -55,8 +55,11 @@ static bool is_platform_object(Type const& type)
         "Text"sv,
         "TextMetrics"sv,
         "URLSearchParams"sv,
+        "VideoTrack"sv,
+        "VideoTrackList"sv,
         "WebGLRenderingContext"sv,
         "Window"sv,
+        "WritableStream"sv,
     };
     if (type.name().ends_with("Element"sv))
         return true;
