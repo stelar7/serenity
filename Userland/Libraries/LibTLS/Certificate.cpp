@@ -8,44 +8,67 @@
 #include "Certificate.h"
 #include <AK/Debug.h>
 #include <AK/IPv4Address.h>
+#include <AK/Math.h>
 #include <LibCrypto/ASN1/ASN1.h>
 #include <LibCrypto/ASN1/DER.h>
 #include <LibCrypto/ASN1/PEM.h>
-#include <LibTLS/CipherSuite.h>
+#include <LibCrypto/Hash/HashManager.h>
 
 namespace TLS {
 
-constexpr static Array<int, 7>
-    rsa_encryption_oid { 1, 2, 840, 113549, 1, 1, 1 },
-    rsa_md5_encryption_oid { 1, 2, 840, 113549, 1, 1, 4 },
-    rsa_sha1_encryption_oid { 1, 2, 840, 113549, 1, 1, 5 },
-    rsa_sha256_encryption_oid { 1, 2, 840, 113549, 1, 1, 11 },
-    rsa_sha384_encryption_oid { 1, 2, 840, 113549, 1, 1, 12 },
-    rsa_sha512_encryption_oid { 1, 2, 840, 113549, 1, 1, 13 },
-    rsa_sha224_encryption_oid { 1, 2, 840, 113549, 1, 1, 14 },
-    ecdsa_with_sha224_encryption_oid { 1, 2, 840, 10045, 4, 3, 1 },
-    ecdsa_with_sha256_encryption_oid { 1, 2, 840, 10045, 4, 3, 2 },
-    ecdsa_with_sha384_encryption_oid { 1, 2, 840, 10045, 4, 3, 3 },
-    ecdsa_with_sha512_encryption_oid { 1, 2, 840, 10045, 4, 3, 3 },
-    ec_public_key_encryption_oid { 1, 2, 840, 10045, 2, 1 };
+#define ENUMERATE_ALGORITHMS(ALGO)                                    \
+    ALGO(rsa_none, None, None, ({ 1, 2, 840, 113549, 1, 1, 1 }))      \
+    ALGO(rsa_md5, MD5, None, ({ 1, 2, 840, 113549, 1, 1, 4 }))        \
+    ALGO(rsa_sha1, SHA1, None, ({ 1, 2, 840, 113549, 1, 1, 5 }))      \
+    ALGO(rsa_sha256, SHA256, None, ({ 1, 2, 840, 113549, 1, 1, 11 })) \
+    ALGO(rsa_sha384, SHA384, None, ({ 1, 2, 840, 113549, 1, 1, 12 })) \
+    ALGO(rsa_sha512, SHA512, None, ({ 1, 2, 840, 113549, 1, 1, 13 })) \
+    ALGO(rsa_sha224, SHA224, None, ({ 1, 2, 840, 113549, 1, 1, 14 })) \
+    ALGO(ecdsa_sha224, SHA224, None, ({ 1, 2, 840, 10045, 4, 3, 1 })) \
+    ALGO(ecdsa_sha256, SHA256, None, ({ 1, 2, 840, 10045, 4, 3, 2 })) \
+    ALGO(ecdsa_sha384, SHA384, None, ({ 1, 2, 840, 10045, 4, 3, 3 })) \
+    ALGO(ecdsa_sha512, SHA512, None, ({ 1, 2, 840, 10045, 4, 3, 3 })) \
+    ALGO(aes256_cbc, None, AES_256_CBC, ({ 2, 16, 840, 1, 101, 3, 4, 1, 42 }))
 
-constexpr static Array<Array<int, 7>, 9> known_algorithm_identifiers {
-    rsa_encryption_oid,
-    rsa_md5_encryption_oid,
-    rsa_sha1_encryption_oid,
-    rsa_sha256_encryption_oid,
-    rsa_sha384_encryption_oid,
-    rsa_sha512_encryption_oid,
-    ecdsa_with_sha256_encryption_oid,
-    ecdsa_with_sha384_encryption_oid,
-    ec_public_key_encryption_oid
+#define ENUMERATE_DIGESTS(ALGO)                                     \
+    ALGO(hmac_sha1, SHA1, None, ({ 1, 2, 840, 113549, 2, 7 }))      \
+    ALGO(hmac_sha224, SHA224, None, ({ 1, 2, 840, 113549, 2, 8 }))  \
+    ALGO(hmac_sha256, SHA256, None, ({ 1, 2, 840, 113549, 2, 9 }))  \
+    ALGO(hmac_sha384, SHA384, None, ({ 1, 2, 840, 113549, 2, 10 })) \
+    ALGO(hmac_sha512, SHA512, None, ({ 1, 2, 840, 113549, 2, 11 }))
+
+#define ALGO(name, hash_algorithm, cipher_algorithm, oid) constexpr static Array<int, 9> name oid;
+
+ENUMERATE_ALGORITHMS(ALGO);
+ENUMERATE_DIGESTS(ALGO);
+
+constexpr static Array<int, 9>
+    ec_public_key_encryption_oid { 1, 2, 840, 10045, 2, 1 },
+    pkcs5_pbes2_encryption_oid { 1, 2, 840, 113549, 1, 5, 13 },
+    pkcs5_pbkdf2_encryption_oid { 1, 2, 840, 113549, 1, 5, 12 };
+
+#undef ALGO
+
+#define ALGO(name, hash_algorithm, cipher_algorithm, oid) name,
+constexpr static Array<Array<int, 9>, 20> known_algorithm_identifiers {
+    ec_public_key_encryption_oid,
+    pkcs5_pbes2_encryption_oid,
+    pkcs5_pbkdf2_encryption_oid,
+    // clang-format off
+    ENUMERATE_ALGORITHMS(ALGO)
+    ENUMERATE_DIGESTS(ALGO)
+    // clang-format on
 };
 
-constexpr static Array<int, 7>
+#undef ALGO
+#undef ENUMERATE_ALGORITHMS
+#undef ENUMERATE_DIGESTS
+
+constexpr static Array<int, 9>
     curve_ansip384r1 { 1, 3, 132, 0, 34 },
     curve_prime256 { 1, 2, 840, 10045, 3, 1, 7 };
 
-constexpr static Array<Array<int, 7>, 9> known_curve_identifiers {
+constexpr static Array<Array<int, 9>, 2> known_curve_identifiers {
     curve_ansip384r1,
     curve_prime256
 };
@@ -122,35 +145,7 @@ static ErrorOr<NamedCurve> oid_to_curve(Vector<int> curve)
     return Error::from_string_view(TRY(String::formatted("Unknown curve oid {}", curve)));
 }
 
-static ErrorOr<CertificateKeyAlgorithm> oid_to_algorithm(Vector<int> algorithm)
-{
-    if (algorithm == rsa_encryption_oid)
-        return CertificateKeyAlgorithm::RSA_RSA;
-    else if (algorithm == rsa_md5_encryption_oid)
-        return CertificateKeyAlgorithm::RSA_MD5;
-    else if (algorithm == rsa_sha1_encryption_oid)
-        return CertificateKeyAlgorithm::RSA_SHA1;
-    else if (algorithm == rsa_sha256_encryption_oid)
-        return CertificateKeyAlgorithm::RSA_SHA256;
-    else if (algorithm == rsa_sha384_encryption_oid)
-        return CertificateKeyAlgorithm::RSA_SHA384;
-    else if (algorithm == rsa_sha512_encryption_oid)
-        return CertificateKeyAlgorithm::RSA_SHA512;
-    else if (algorithm == rsa_sha224_encryption_oid)
-        return CertificateKeyAlgorithm::RSA_SHA224;
-    else if (algorithm == ecdsa_with_sha224_encryption_oid)
-        return CertificateKeyAlgorithm::ECDSA_SHA224;
-    else if (algorithm == ecdsa_with_sha256_encryption_oid)
-        return CertificateKeyAlgorithm::ECDSA_SHA256;
-    else if (algorithm == ecdsa_with_sha384_encryption_oid)
-        return CertificateKeyAlgorithm::ECDSA_SHA384;
-    else if (algorithm == ecdsa_with_sha512_encryption_oid)
-        return CertificateKeyAlgorithm::ECDSA_SHA512;
-
-    return Error::from_string_view(TRY(String::formatted("Unknown algorithm oid {}", algorithm)));
-}
-
-static ErrorOr<Crypto::UnsignedBigInteger> parse_version(Crypto::ASN1::Decoder& decoder, Vector<StringView> current_scope)
+static ErrorOr<Crypto::UnsignedBigInteger> parse_certificate_version(Crypto::ASN1::Decoder& decoder, Vector<StringView> current_scope)
 {
     // Version ::= INTEGER {v1(0), v2(1), v3(2)}
     if (auto tag = decoder.peek(); !tag.is_error() && tag.value().type == Crypto::ASN1::Type::Constructed) {
@@ -182,8 +177,8 @@ static ErrorOr<NamedCurve> parse_ec_parameters(Crypto::ASN1::Decoder& decoder, V
     // }
     PUSH_SCOPE("ECParameters"sv);
     READ_OBJECT(ObjectIdentifier, Vector<int>, named_curve);
-    // Note: namedCurve sometimes has 5 nodes, but we need 7 for the comparison below to work.
-    while (named_curve.size() < 7) {
+    // Note: Some nodes have fewer leafs, but we need atleast 9 for the comparison below to work.
+    while (named_curve.size() < 9) {
         named_curve.append(0);
     }
     POP_SCOPE();
@@ -203,7 +198,101 @@ static ErrorOr<NamedCurve> parse_ec_parameters(Crypto::ASN1::Decoder& decoder, V
     return oid_to_curve(named_curve);
 }
 
-static ErrorOr<CertificateKeyAlgorithm> parse_algorithm_identifier(Crypto::ASN1::Decoder& decoder, Vector<StringView> current_scope)
+static ErrorOr<AlgorithmIdentifier> parse_algorithm_identifier(Crypto::ASN1::Decoder&, Vector<StringView>);
+
+static ErrorOr<PBKDF2Parameters> parse_pbkdf2_parameters(Crypto::ASN1::Decoder& decoder, Vector<StringView> current_scope)
+{
+    // PBKDF2-params ::= SEQUENCE {
+    //     salt CHOICE {
+    //         specified OCTET STRING,
+    //         otherSource AlgorithmIdentifier {{PBKDF2-SaltSources}}
+    //     },
+    //     iterationCount INTEGER (1..MAX),
+    //     keyLength INTEGER (1..MAX) OPTIONAL,
+    //     prf AlgorithmIdentifier {{PBKDF2-PRFs}} DEFAULT algid-hmacWithSHA1
+    // }
+
+    ENTER_TYPED_SCOPE(Sequence, "PBKDF2-params");
+
+    PBKDF2Parameters parameters {};
+    parameters.prf = AlgorithmIdentifier(hmac_sha1);
+
+    PUSH_SCOPE("salt"sv);
+    auto tag = TRY(decoder.peek());
+    if (tag.kind == Crypto::ASN1::Kind::OctetString) {
+        PUSH_SCOPE("specified"sv);
+        READ_OBJECT(OctetString, StringView, specified);
+        parameters.salt = TRY(ByteBuffer::copy(specified.bytes()));
+        POP_SCOPE();
+    } else if (tag.kind == Crypto::ASN1::Kind::ObjectIdentifier) {
+        PUSH_SCOPE("otherSource"sv);
+        READ_OBJECT(ObjectIdentifier, Vector<int>, other_source);
+        parameters.salt = move(other_source);
+        POP_SCOPE();
+    } else {
+        ERROR_WITH_SCOPE(TRY(String::formatted("Invalid option in choice: {}"sv, kind_name(tag.kind))));
+    }
+    POP_SCOPE();
+
+    PUSH_SCOPE("iterationCount"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, iteration_count);
+    parameters.iteration_count = iteration_count.to_u64();
+    POP_SCOPE();
+
+    if (decoder.eof()) {
+        EXIT_SCOPE();
+        return parameters;
+    }
+
+    PUSH_SCOPE("keyLength"sv);
+    auto integer_tag = TRY(decoder.peek());
+    if (integer_tag.kind == Crypto::ASN1::Kind::Integer) {
+        READ_OBJECT(Integer, Crypto::UnsignedBigInteger, key_length);
+        parameters.key_length = key_length.to_u64();
+    }
+    POP_SCOPE();
+
+    if (decoder.eof()) {
+        EXIT_SCOPE();
+        return parameters;
+    }
+
+    PUSH_SCOPE("prf"sv);
+    auto prf_tag = TRY(decoder.peek());
+    if (prf_tag.kind == Crypto::ASN1::Kind::Sequence) {
+        parameters.prf = TRY(parse_algorithm_identifier(decoder, current_scope));
+    }
+    POP_SCOPE();
+
+    EXIT_SCOPE();
+    return parameters;
+}
+
+static ErrorOr<PBES2Parameters> parse_pbes2_parameters(Crypto::ASN1::Decoder& decoder, Vector<StringView> current_scope)
+{
+    // PBES2-params ::= SEQUENCE {
+    //     keyDerivationFunc AlgorithmIdentifier {{PBES2-KDFs}},
+    //     encryptionScheme AlgorithmIdentifier {{PBES2-Encs}}
+    // }
+
+    ENTER_TYPED_SCOPE(Sequence, "PBES2-params");
+
+    PBES2Parameters parameters;
+
+    PUSH_SCOPE("keyDerivationFunc"sv);
+    parameters.key_derivation_function = TRY(parse_algorithm_identifier(decoder, current_scope));
+    POP_SCOPE();
+
+    PUSH_SCOPE("encryptionScheme"sv);
+    parameters.encryption_scheme = TRY(parse_algorithm_identifier(decoder, current_scope));
+    POP_SCOPE();
+
+    EXIT_SCOPE();
+
+    return parameters;
+}
+
+static ErrorOr<AlgorithmIdentifier> parse_algorithm_identifier(Crypto::ASN1::Decoder& decoder, Vector<StringView> current_scope)
 {
     // AlgorithmIdentifier{ALGORITHM:SupportedAlgorithms} ::= SEQUENCE {
     //     algorithm ALGORITHM.&id({SupportedAlgorithms}),
@@ -212,8 +301,8 @@ static ErrorOr<CertificateKeyAlgorithm> parse_algorithm_identifier(Crypto::ASN1:
     ENTER_TYPED_SCOPE(Sequence, "AlgorithmIdentifier"sv);
     PUSH_SCOPE("algorithm"sv);
     READ_OBJECT(ObjectIdentifier, Vector<int>, algorithm);
-    // Note: ecPublicKey only has 6 nodes, but we need 7 for the comparison below to work.
-    while (algorithm.size() < 7) {
+    // Note: Some nodes have fewer leafs, but we need 9 for the comparison below to work.
+    while (algorithm.size() < 9) {
         algorithm.append(0);
     }
     POP_SCOPE();
@@ -227,7 +316,7 @@ static ErrorOr<CertificateKeyAlgorithm> parse_algorithm_identifier(Crypto::ASN1:
     }
 
     if (!is_known_algorithm) {
-        ERROR_WITH_SCOPE(TRY(String::formatted("Unknown algorithm {}", algorithm)));
+        ERROR_WITH_SCOPE(TRY(String::formatted("Unknown algorithm '{}', '{}'", algorithm, pkcs5_pbes2_encryption_oid.span())));
     }
 
     // -- When the following OIDs are used in an AlgorithmIdentifier, the
@@ -239,43 +328,56 @@ static ErrorOr<CertificateKeyAlgorithm> parse_algorithm_identifier(Crypto::ASN1:
     //      sha384WithRSAEncryption  OBJECT IDENTIFIER  ::=  { pkcs-1 12 }
     //      sha512WithRSAEncryption  OBJECT IDENTIFIER  ::=  { pkcs-1 13 }
     //      sha224WithRSAEncryption  OBJECT IDENTIFIER  ::=  { pkcs-1 14 }
-    Array<Array<int, 7>, 8> rsa_null_algorithms = {
-        rsa_encryption_oid,
-        rsa_md5_encryption_oid,
-        rsa_sha1_encryption_oid,
-        rsa_sha256_encryption_oid,
-        rsa_sha384_encryption_oid,
-        rsa_sha512_encryption_oid,
-        rsa_sha224_encryption_oid,
+    //
+    //      id-hmacWithSHA224 OBJECT IDENTIFIER ::= {digestAlgorithm 8}
+    //      id-hmacWithSHA256 OBJECT IDENTIFIER ::= {digestAlgorithm 9}
+    //      id-hmacWithSHA384 OBJECT IDENTIFIER ::= {digestAlgorithm 10}
+    //      id-hmacWithSHA512 OBJECT IDENTIFIER ::= {digestAlgorithm 11}
+
+    Array<Array<int, 9>, 12> null_algorithms = {
+        rsa_none,
+        rsa_md5,
+        rsa_sha1,
+        rsa_sha256,
+        rsa_sha384,
+        rsa_sha512,
+        rsa_sha224,
+        hmac_sha224,
+        hmac_sha256,
+        hmac_sha384,
+        hmac_sha512
     };
 
-    bool is_rsa_null_algorithm = false;
-    for (auto const& inner : rsa_null_algorithms) {
+    bool is_null_algorithm = false;
+    for (auto const& inner : null_algorithms) {
         if (inner.span() == algorithm.span()) {
-            is_rsa_null_algorithm = true;
+            is_null_algorithm = true;
             break;
         }
     }
 
-    if (is_rsa_null_algorithm) {
-        PUSH_SCOPE("RSA null parameter"sv);
+    if (is_null_algorithm) {
+        PUSH_SCOPE("null parameter"sv);
         READ_OBJECT(Null, void*, forced_null);
         (void)forced_null;
         POP_SCOPE();
 
         EXIT_SCOPE();
-        return oid_to_algorithm(algorithm);
+
+        AlgorithmIdentifier result;
+        result.identifier = move(algorithm);
+        return result;
     }
 
     // When the ecdsa-with-SHA224, ecdsa-with-SHA256, ecdsa-with-SHA384, or
     // ecdsa-with-SHA512 algorithm identifier appears in the algorithm field
     // as an AlgorithmIdentifier, the encoding MUST omit the parameters
     // field.
-    Array<Array<int, 7>, 8> no_parameter_algorithms = {
-        ecdsa_with_sha224_encryption_oid,
-        ecdsa_with_sha256_encryption_oid,
-        ecdsa_with_sha384_encryption_oid,
-        ecdsa_with_sha512_encryption_oid,
+    Array<Array<int, 9>, 4> no_parameter_algorithms = {
+        ecdsa_sha224,
+        ecdsa_sha256,
+        ecdsa_sha384,
+        ecdsa_sha512,
     };
 
     bool is_no_parameter_algorithm = false;
@@ -288,7 +390,9 @@ static ErrorOr<CertificateKeyAlgorithm> parse_algorithm_identifier(Crypto::ASN1:
     if (is_no_parameter_algorithm) {
         EXIT_SCOPE();
 
-        return oid_to_algorithm(algorithm);
+        AlgorithmIdentifier result;
+        result.identifier = move(algorithm);
+        return result;
     }
 
     if (algorithm.span() == ec_public_key_encryption_oid.span()) {
@@ -297,7 +401,9 @@ static ErrorOr<CertificateKeyAlgorithm> parse_algorithm_identifier(Crypto::ASN1:
         if (decoder.eof()) {
             EXIT_SCOPE();
 
-            return oid_to_algorithm(algorithm);
+            AlgorithmIdentifier result;
+            result.identifier = move(algorithm);
+            return result;
         }
 
         auto tag = TRY(decoder.peek());
@@ -308,16 +414,59 @@ static ErrorOr<CertificateKeyAlgorithm> parse_algorithm_identifier(Crypto::ASN1:
             POP_SCOPE();
 
             EXIT_SCOPE();
-            return oid_to_algorithm(algorithm);
+
+            AlgorithmIdentifier result;
+            result.identifier = move(algorithm);
+            return result;
         }
 
         auto ec_parameters = TRY(parse_ec_parameters(decoder, current_scope));
         EXIT_SCOPE();
 
-        if (ec_parameters == NamedCurve::secp256r1)
-            return CertificateKeyAlgorithm::ECDSA_SECP256R1;
-        else if (ec_parameters == NamedCurve::secp384r1)
-            return CertificateKeyAlgorithm::ECDSA_SECP384R1;
+        AlgorithmIdentifier result;
+        result.identifier = move(algorithm);
+        result.parameters = move(ec_parameters);
+        return result;
+    }
+
+    if (algorithm.span() == pkcs5_pbes2_encryption_oid.span()) {
+        auto pbes2_parameters = TRY(parse_pbes2_parameters(decoder, current_scope));
+        // NOTE: Use this once the cycle is removed
+        (void)pbes2_parameters;
+
+        EXIT_SCOPE();
+
+        AlgorithmIdentifier result;
+        result.identifier = move(algorithm);
+        // result.parameters = move(pbes2_parameters);
+        return result;
+    }
+
+    if (algorithm.span() == pkcs5_pbkdf2_encryption_oid.span()) {
+        auto pbkdf2_parameters = TRY(parse_pbkdf2_parameters(decoder, current_scope));
+        // NOTE: Use this once the cycle is removed
+        (void)pbkdf2_parameters;
+
+        EXIT_SCOPE();
+
+        AlgorithmIdentifier result;
+        result.identifier = move(algorithm);
+        // result.parameters = move(pbkdf2_parameters);
+        return result;
+    }
+
+    if (algorithm.span() == aes256_cbc.span()) {
+        PUSH_SCOPE("AES-IV");
+        READ_OBJECT(OctetString, StringView, aes_iv_view);
+        auto aes_iv = TRY(ByteBuffer::copy(aes_iv_view.bytes()));
+        POP_SCOPE();
+
+        EXIT_SCOPE();
+
+        AlgorithmIdentifier result;
+        result.identifier = move(algorithm);
+        result.parameters = move(aes_iv);
+        return result;
     }
 
     ERROR_WITH_SCOPE(TRY(String::formatted("Unhandled parameters for algorithm {}", algorithm)));
@@ -432,13 +581,11 @@ static ErrorOr<SubjectPublicKey> parse_subject_public_key_info(Crypto::ASN1::Dec
     READ_OBJECT(BitString, Crypto::ASN1::BitStringView, value);
     POP_SCOPE();
 
-    switch (public_key.algorithm) {
-    case CertificateKeyAlgorithm::ECDSA_SECP256R1:
-    case CertificateKeyAlgorithm::ECDSA_SECP384R1: {
+    if (public_key.algorithm.identifier == ecdsa_sha256 || public_key.algorithm.identifier == ecdsa_sha384) {
         public_key.raw_key = TRY(ByteBuffer::copy(value.raw_bytes()));
-        break;
     }
-    case CertificateKeyAlgorithm::RSA_RSA: {
+
+    if (public_key.algorithm.identifier == rsa_none) {
         public_key.raw_key = TRY(ByteBuffer::copy(value.raw_bytes()));
         auto key = Crypto::PK::RSA::parse_rsa_key(value.raw_bytes());
         if (!key.public_key.length()) {
@@ -446,11 +593,10 @@ static ErrorOr<SubjectPublicKey> parse_subject_public_key_info(Crypto::ASN1::Dec
         }
 
         public_key.rsa = move(key.public_key);
-        break;
     }
-    default: {
-        ERROR_WITH_SCOPE(TRY(String::formatted("Unknown algorithm {}", static_cast<u8>(public_key.algorithm))));
-    }
+
+    if (public_key.raw_key.is_empty()) {
+        ERROR_WITH_SCOPE(TRY(String::formatted("Unhandled algorithm {}", public_key.algorithm.identifier)));
     }
 
     EXIT_SCOPE();
@@ -748,7 +894,7 @@ static ErrorOr<Certificate> parse_tbs_certificate(Crypto::ASN1::Decoder& decoder
     ENTER_TYPED_SCOPE(Sequence, "TBSCertificate"sv);
 
     Certificate certificate;
-    certificate.version = TRY(parse_version(decoder, current_scope)).to_u64();
+    certificate.version = TRY(parse_certificate_version(decoder, current_scope)).to_u64();
     certificate.serial_number = TRY(parse_serial_number(decoder, current_scope));
     certificate.algorithm = TRY(parse_algorithm_identifier(decoder, current_scope));
     certificate.issuer = TRY(parse_name(decoder, current_scope));
@@ -822,8 +968,7 @@ ErrorOr<Certificate> Certificate::parse_certificate(ReadonlyBytes buffer, bool)
     Certificate certificate = TRY(parse_tbs_certificate(decoder, current_scope));
     certificate.original_asn1 = TRY(ByteBuffer::copy(buffer));
 
-    CertificateKeyAlgorithm signature_algorithm = TRY(parse_algorithm_identifier(decoder, current_scope));
-    certificate.signature_algorithm = signature_algorithm;
+    certificate.signature_algorithm = TRY(parse_algorithm_identifier(decoder, current_scope));
 
     PUSH_SCOPE("signature"sv);
     READ_OBJECT(BitString, Crypto::ASN1::BitStringView, signature);
@@ -837,6 +982,152 @@ ErrorOr<Certificate> Certificate::parse_certificate(ReadonlyBytes buffer, bool)
     EXIT_SCOPE();
 
     return certificate;
+}
+
+static ErrorOr<Crypto::PK::RSAPrivateKey<Crypto::UnsignedBigInteger>> parse_rsa_private_key(Crypto::ASN1::Decoder& decoder, Vector<StringView> current_scope)
+{
+    // RSAPrivateKey ::= SEQUENCE {
+    //     version           Version,
+    //     modulus           INTEGER,  -- n
+    //     publicExponent    INTEGER,  -- e
+    //     privateExponent   INTEGER,  -- d
+    //     prime1            INTEGER,  -- p
+    //     prime2            INTEGER,  -- q
+    //     exponent1         INTEGER,  -- d mod (p-1)
+    //     exponent2         INTEGER,  -- d mod (q-1)
+    //     coefficient       INTEGER,  -- (inverse of q) mod p
+    //     otherPrimeInfos   OtherPrimeInfos OPTIONAL
+    // }
+
+    ENTER_TYPED_SCOPE(Sequence, "RSAPrivateKey"sv);
+
+    PUSH_SCOPE("version"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, version);
+    POP_SCOPE();
+
+    PUSH_SCOPE("modulus"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, modulus);
+    POP_SCOPE();
+
+    PUSH_SCOPE("publicExponent"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, public_exponent);
+    POP_SCOPE();
+
+    PUSH_SCOPE("privateExponent"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, private_exponent);
+    POP_SCOPE();
+
+    PUSH_SCOPE("prime1"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, prime1);
+    POP_SCOPE();
+
+    PUSH_SCOPE("prime2"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, prime2);
+    POP_SCOPE();
+
+    PUSH_SCOPE("exponent1"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, exponent1);
+    POP_SCOPE();
+
+    PUSH_SCOPE("exponent2"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, exponent2);
+    POP_SCOPE();
+
+    PUSH_SCOPE("coefficient"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, coefficient);
+    POP_SCOPE();
+
+    if (!decoder.eof() && version.to_u64() == 0) {
+        return Error::from_string_view("otherPrimeInfos SHALL be omitted if version is 0"sv);
+    }
+
+    if (decoder.eof() && version.to_u64() == 1) {
+        return Error::from_string_view("otherPrimeInfos SHALL contain at least one instance of OtherPrimeInfo if version is 1"sv);
+    }
+
+    if (!decoder.eof()) {
+        return Error::from_string_view("otherPrimeInfos is unhandled"sv);
+    }
+
+    EXIT_SCOPE();
+
+    return Crypto::PK::RSAPrivateKey(modulus, private_exponent, public_exponent);
+}
+
+ErrorOr<Crypto::PK::RSAPrivateKey<Crypto::UnsignedBigInteger>> Certificate::parse_private_key(ReadonlyBytes buffer)
+{
+    Crypto::ASN1::Decoder decoder { buffer };
+    Vector<StringView, 8> current_scope {};
+
+    // PrivateKeyInfo ::= SEQUENCE {
+    //     version                   Version,
+    //     privateKeyAlgorithm       PrivateKeyAlgorithmIdentifier,
+    //     privateKey                PrivateKey,
+    //     attributes           [0]  IMPLICIT Attributes OPTIONAL
+    // }
+
+    // Version ::= INTEGER
+    // PrivateKeyAlgorithmIdentifier ::= AlgorithmIdentifier
+    // PrivateKey ::= OCTET STRING
+    // Attributes ::= SET OF Attribute
+
+    ENTER_TYPED_SCOPE(Sequence, "PrivateKeyInfo"sv);
+
+    PUSH_SCOPE("version"sv);
+    READ_OBJECT(Integer, Crypto::UnsignedBigInteger, version);
+    POP_SCOPE();
+
+    auto algorithm = TRY(parse_algorithm_identifier(decoder, current_scope));
+
+    PUSH_SCOPE("privateKey"sv);
+    READ_OBJECT(OctetString, StringView, private_key);
+    POP_SCOPE();
+
+    if (algorithm.identifier != rsa_none) {
+        return Error::from_string_view(TRY(String::formatted("Unable to decode algorithm {}"sv, algorithm.identifier)));
+    }
+
+    Crypto::ASN1::Decoder key_decoder { private_key.bytes() };
+    auto key = TRY(parse_rsa_private_key(key_decoder, current_scope));
+
+    EXIT_SCOPE();
+
+    return key;
+}
+
+ErrorOr<Crypto::PK::RSAPrivateKey<Crypto::UnsignedBigInteger>> Certificate::parse_encrypted_private_key(ReadonlyBytes buffer)
+{
+    Crypto::ASN1::Decoder decoder { buffer };
+    Vector<StringView, 8> current_scope {};
+
+    // EncryptedPrivateKeyInfo ::= SEQUENCE {
+    //     encryptionAlgorithm  EncryptionAlgorithmIdentifier,
+    //     encryptedData        EncryptedData
+    // }
+
+    // EncryptionAlgorithmIdentifier ::= AlgorithmIdentifier
+    // EncryptedData ::= OCTET STRING
+
+    ENTER_TYPED_SCOPE(Sequence, "EncryptedPrivateKeyInfo"sv);
+
+    auto algorithm = TRY(parse_algorithm_identifier(decoder, current_scope));
+
+    PUSH_SCOPE("encryptedData"sv);
+    READ_OBJECT(OctetString, StringView, encrypted_data);
+    (void)encrypted_data;
+    POP_SCOPE();
+
+    if (algorithm.identifier != pkcs5_pbes2_encryption_oid) {
+        return Error::from_string_view(TRY(String::formatted("Unable to decrypt algorithm {}"sv, algorithm.identifier)));
+    }
+
+    EXIT_SCOPE();
+
+    // FIXME: Decode the PBES2 data
+    // https://www.rfc-editor.org/rfc/rfc8018#section-6.2.2
+    // return parse_private_key(decoded);
+
+    return Error::from_string_view("Unable to decrypt PBES2 data"sv);
 }
 
 #undef PUSH_SCOPE
