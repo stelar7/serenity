@@ -9,6 +9,7 @@
 #include <LibCore/EventLoop.h>
 #include <LibCore/Timer.h>
 #include <LibCrypto/PK/Code/EMSA_PSS.h>
+#include <LibTLS/TLSRecord.h>
 #include <LibTLS/TLSv12.h>
 
 // Each record can hold at most 18432 bytes, leaving some headroom and rounding down to
@@ -263,7 +264,13 @@ ErrorOr<bool> TLSv12::flush()
 
     if constexpr (TLS_DEBUG) {
         dbgln("SENDING...");
-        print_buffer(out_bytes);
+        auto maybe_record = TLSRecord::decode(out_bytes);
+        if (!maybe_record.is_error()) {
+            auto maybe_string = maybe_record.value()->to_string(0);
+            if (!maybe_string.is_error()) {
+                dbgln("{}", maybe_string.value());
+            }
+        }
     }
 
     auto& stream = underlying_stream();

@@ -180,6 +180,11 @@ struct AlgorithmIdentifier {
     {
     }
 
+    ErrorOr<String> to_string() const
+    {
+        return String::formatted("{} ({})", TRY(String::join("."sv, identifier)), enum_to_string(ec_parameters));
+    }
+
     Vector<int, 9> identifier;
     SupportedGroup ec_parameters {};
 };
