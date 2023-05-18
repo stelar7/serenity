@@ -404,6 +404,7 @@ if (BUILD_LAGOM)
         Wasm
         WebSocket
         XML
+        YAML
     )
 
     if (ENABLE_LAGOM_LIBWEB)
@@ -619,6 +620,8 @@ if (BUILD_LAGOM)
         foreach (dir IN LISTS TEST_DIRECTORIES)
             add_serenity_subdirectory("Tests/${dir}")
         endforeach()
+
+        lagom_test(../../Tests/LibYAML/TestParser.cpp LibYAML LIBS LibYAML LibTest)
 
         # LibTLS needs a special working directory to find cacert.pem
         lagom_test(../../Tests/LibTLS/TestTLSHandshake.cpp LibTLS LIBS LibTLS LibCrypto)
