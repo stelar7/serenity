@@ -5,7 +5,9 @@
  */
 
 #include <AK/URLParser.h>
+#include <LibJS/FetchState.h>
 #include <LibJS/Runtime/ModuleRequest.h>
+#include <LibJS/Runtime/NativeFunction.h>
 #include <LibTextCodec/Decoder.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Fetch/Fetching/Fetching.h>
@@ -436,7 +438,7 @@ void fetch_single_module_script(AK::URL const& url, EnvironmentSettingsObject&, 
 
     // 3. Assert: the result of running the module type allowed steps given moduleType and module map settings object is true.
     //    Otherwise we would not have reached this point because a failure would have been raised when inspecting moduleRequest.[[Assertions]]
-    //    in create a JavaScript module script or fetch an import() module script graph.
+    //    in create a JavaScript module script or fetch a single imported module script.
     VERIFY(module_map_settings_object.module_type_allowed(module_type));
 
     // 4. Let moduleMap be module map settings object's module map.
@@ -521,13 +523,9 @@ void fetch_external_module_script_graph(AK::URL const& url, EnvironmentSettingsO
             return;
         }
 
-        // 2. Let visited set be « (url, "javascript") ».
-        HashTable<ModuleLocationTuple> visited_set;
-        visited_set.set({ url, "javascript"sv });
-
-        // 3. Fetch the descendants of and link result given settings object, "script", visited set, and onComplete.
+        // 2. Fetch the descendants of and link result given settings object, "script", and onComplete.
         auto& module_script = verify_cast<JavaScriptModuleScript>(*result);
-        fetch_descendants_of_and_link_a_module_script(module_script, settings_object, "script"sv, move(visited_set), move(on_complete));
+        fetch_descendants_of_and_link_a_module_script(module_script, settings_object, "script"sv, move(on_complete));
     });
 }
 
@@ -546,56 +544,77 @@ void fetch_inline_module_script_graph(DeprecatedString const& filename, Deprecat
         return;
     }
 
-    // 4. Let visited set be an empty set.
-    HashTable<ModuleLocationTuple> visited_set;
-
-    // 5. Fetch the descendants of and link script, given settings object, the destination "script", visited set, and onComplete.
-    fetch_descendants_of_and_link_a_module_script(*script, settings_object, "script"sv, visited_set, move(on_complete));
+    // 4. Fetch the descendants of and link script, given settings object, the destination "script", and onComplete.
+    fetch_descendants_of_and_link_a_module_script(*script, settings_object, "script"sv, move(on_complete));
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-the-descendants-of-and-link-a-module-script
-void fetch_descendants_of_and_link_a_module_script(JavaScriptModuleScript& module_script, EnvironmentSettingsObject& fetch_client_settings_object, StringView destination, HashTable<ModuleLocationTuple> const& visited_set, OnFetchScriptComplete on_complete)
+void fetch_descendants_of_and_link_a_module_script(JavaScriptModuleScript& module_script, EnvironmentSettingsObject& fetch_client_settings_object, StringView destination, OnFetchScriptComplete on_complete)
 {
-    // 1. Fetch the descendants of module script, given fetch client settings object, destination, visited set, and onFetchDescendantsComplete as defined below.
-    //    If performFetch was given, pass it along as well.
-    // FIXME: Pass performFetch if given.
-    fetch_descendants_of_a_module_script(module_script, fetch_client_settings_object, destination, visited_set, [&fetch_client_settings_object, on_complete = move(on_complete)](auto result) {
-        // onFetchDescendantsComplete given result is the following algorithm:
-        // 1. If result is null, then run onComplete given result, and abort these steps.
-        if (!result) {
-            on_complete(nullptr);
-            return;
+    // NOTE: This are unused in the spec
+    (void)fetch_client_settings_object;
+
+    // 1. Let record be module script's record.
+    auto const& record = module_script.record();
+
+    // 2. If record is null, then:
+    if (!record) {
+        // 1. Set module script's error to rethrow to module script's parse error.
+        module_script.set_error_to_rethrow(module_script.parse_error());
+
+        // 2. Run onComplete given module script.
+        on_complete(&module_script);
+
+        // 3. Return.
+        return;
+    }
+
+    auto& realm = record->realm();
+    auto& vm = realm.vm();
+
+    // 3. Let state be Record { [[ParseError]]: null, [[Destination]]: destination, [[PerformFetch]]: null }.
+    auto state = JS::FetchState(nullptr, destination, nullptr);
+
+    // FIXME: 4. If performFetch was given, set state.[[PerformFetch]] to performFetch.
+
+    // 5. Let loadingPromise be record.LoadRequestedModules(state).
+    auto loading_promise = record->load_requested_modules(vm, static_cast<JS::Script::HostDefined*>(&state));
+
+    // 6. Upon fulfillment of loadingPromise, run the following steps:
+    auto on_fulfillment = [&, on_complete = move(on_complete)](JS::VM&) {
+        // 1. Perform record.Link().
+        auto link_result = record->link(vm);
+
+        // If this throws an exception, catch it, and set module script's error to rethrow to that exception.
+        if (link_result.is_throw_completion())
+            module_script.set_error_to_rethrow(link_result.release_error().value().value());
+
+        // 2. Run onComplete given module script.
+        on_complete(&module_script);
+
+        return JS::js_undefined();
+    };
+
+    // 7. Upon rejection of loadingPromise, run the following steps:
+    auto on_rejection = [&, on_complete = move(on_complete)](JS::VM&) {
+        // 1. If state.[[ParseError]] is not null, set module script's error to rethrow to state.[[ParseError]] and run onComplete given module script.
+        if (state.m_parse_error) {
+            module_script.set_error_to_rethrow(*state.m_parse_error);
+            on_complete(&module_script);
+
+            return JS::js_undefined();
         }
 
-        // FIXME: This is an ad-hoc hack to make sure that there's an execution context on the VM stack in case linking throws an exception.
-        auto& vm = fetch_client_settings_object.vm();
-        vm.push_execution_context(fetch_client_settings_object.realm_execution_context());
+        // 2. Otherwise, run onComplete given null.
+        on_complete(nullptr);
 
-        // FIXME: 2. Let parse error be the result of finding the first parse error given result.
+        return JS::js_undefined();
+    };
 
-        // 3. If parse error is null, then:
-        if (auto& module_script = verify_cast<JavaScriptModuleScript>(*result); module_script.record()) {
-            // 1. Let record be result's record.
-            auto const& record = *module_script.record();
+    auto on_rejected = JS::NativeFunction::create(realm, move(on_rejection), 0, "");
+    auto on_fulfilled = JS::NativeFunction::create(realm, move(on_fulfillment), 0, "");
 
-            // 2. Perform record.Link().
-            auto linking_result = const_cast<JS::SourceTextModule&>(record).link(result->vm());
-
-            // If this throws an exception, set result's error to rethrow to that exception.
-            if (linking_result.is_throw_completion()) {
-                result->set_error_to_rethrow(linking_result.release_error().value().value());
-            }
-        } else {
-            // FIXME: 4. Otherwise, set result's error to rethrow to parse error.
-            TODO();
-        }
-
-        // FIXME: This undoes the ad-hoc hack above.
-        vm.pop_execution_context();
-
-        // 5. Run onComplete given result.
-        on_complete(result);
-    });
+    loading_promise->perform_then(on_fulfilled, on_rejected, {});
 }
 
 }

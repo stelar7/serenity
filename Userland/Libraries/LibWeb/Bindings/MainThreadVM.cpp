@@ -344,10 +344,6 @@ ErrorOr<void> initialize_main_thread_vm()
         return { JS::make_handle(&callable), move(host_defined) };
     };
 
-    // FIXME: Implement 8.1.5.5.1 HostGetImportMetaProperties(moduleRecord), https://html.spec.whatwg.org/multipage/webappapis.html#hostgetimportmetaproperties
-    // FIXME: Implement 8.1.5.5.2 HostImportModuleDynamically(referencingScriptOrModule, moduleRequest, promiseCapability), https://html.spec.whatwg.org/multipage/webappapis.html#hostimportmoduledynamically(referencingscriptormodule,-modulerequest,-promisecapability)
-    // FIXME: Implement 8.1.5.5.3 HostResolveImportedModule(referencingScriptOrModule, moduleRequest), https://html.spec.whatwg.org/multipage/webappapis.html#hostresolveimportedmodule(referencingscriptormodule,-modulerequest)
-
     // 8.1.5.5.4 HostGetSupportedImportAssertions(), https://html.spec.whatwg.org/multipage/webappapis.html#hostgetsupportedimportassertions
     s_main_thread_vm->host_get_supported_import_assertions = []() -> Vector<DeprecatedString> {
         // 1. Return « "type" ».

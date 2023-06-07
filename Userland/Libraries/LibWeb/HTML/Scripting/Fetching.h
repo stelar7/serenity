@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <LibJS/Heap/Cell.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
 #include <LibWeb/HTML/CORSSettingAttribute.h>
 #include <LibWeb/HTML/Scripting/ImportMap.h>
@@ -77,7 +78,7 @@ void fetch_external_module_script_graph(AK::URL const&, EnvironmentSettingsObjec
 void fetch_inline_module_script_graph(DeprecatedString const& filename, DeprecatedString const& source_text, AK::URL const& base_url, EnvironmentSettingsObject& settings_object, OnFetchScriptComplete on_complete);
 
 void fetch_descendants_of_a_module_script(JavaScriptModuleScript& module_script, EnvironmentSettingsObject& fetch_client_settings_object, StringView destination, HashTable<ModuleLocationTuple> visited_set, OnFetchScriptComplete callback);
-void fetch_descendants_of_and_link_a_module_script(JavaScriptModuleScript& module_script, EnvironmentSettingsObject& fetch_client_settings_object, StringView destination, HashTable<ModuleLocationTuple> const& visited_set, OnFetchScriptComplete on_complete);
+void fetch_descendants_of_and_link_a_module_script(JavaScriptModuleScript& module_script, EnvironmentSettingsObject& fetch_client_settings_object, StringView destination, OnFetchScriptComplete on_complete);
 
 enum class TopLevelModule {
     Yes,
