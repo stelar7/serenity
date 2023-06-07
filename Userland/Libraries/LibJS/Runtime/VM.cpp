@@ -95,39 +95,6 @@ VM::VM(OwnPtr<CustomData> custom_data, ErrorMessages error_messages)
         return resolve_imported_module(move(referencing_script_or_module), specifier);
     };
 
-    host_import_module_dynamically = [&](ScriptOrModule, ModuleRequest const&, PromiseCapability const& promise_capability) -> ThrowCompletionOr<void> {
-        // By default, we throw on dynamic imports this is to prevent arbitrary file access by scripts.
-        VERIFY(current_realm());
-        auto& realm = *current_realm();
-        auto promise = Promise::create(realm);
-
-        // If you are here because you want to enable dynamic module importing make sure it won't be a security problem
-        // by checking the default implementation of HostImportModuleDynamically and creating your own hook or calling
-        // vm.enable_default_host_import_module_dynamically_hook().
-        promise->reject(MUST_OR_THROW_OOM(Error::create(realm, ErrorType::DynamicImportNotAllowed.message())));
-
-        promise->perform_then(
-            NativeFunction::create(realm, "", [](auto&) -> ThrowCompletionOr<Value> {
-                VERIFY_NOT_REACHED();
-            }),
-            NativeFunction::create(realm, "", [&promise_capability](auto& vm) -> ThrowCompletionOr<Value> {
-                auto error = vm.argument(0);
-
-                // a. Perform ! Call(promiseCapability.[[Reject]], undefined, « error »).
-                MUST(call(vm, *promise_capability.reject(), js_undefined(), error));
-
-                // b. Return undefined.
-                return js_undefined();
-            }),
-            {});
-
-        return {};
-    };
-
-    host_finish_dynamic_import = [&](ScriptOrModule referencing_script_or_module, ModuleRequest const& specifier, PromiseCapability const& promise_capability, Promise* promise) {
-        return finish_dynamic_import(move(referencing_script_or_module), specifier, promise_capability, promise);
-    };
-
     host_get_import_meta_properties = [&](SourceTextModule const&) -> HashMap<PropertyKey, Value> {
         return {};
     };
@@ -174,13 +141,6 @@ String const& VM::error_message(ErrorMessage type) const
     VERIFY(!message.is_empty());
 
     return message;
-}
-
-void VM::enable_default_host_import_module_dynamically_hook()
-{
-    host_import_module_dynamically = [&](ScriptOrModule referencing_script_or_module, ModuleRequest const& specifier, PromiseCapability const& promise_capability) {
-        return import_module_dynamically(move(referencing_script_or_module), specifier, promise_capability);
-    };
 }
 
 Interpreter& VM::interpreter()
@@ -984,124 +944,6 @@ ThrowCompletionOr<NonnullGCPtr<Module>> VM::resolve_imported_module(ScriptOrModu
         false);
 
     return module;
-}
-
-// 16.2.1.8 HostImportModuleDynamically ( referencingScriptOrModule, specifier, promiseCapability ), https://tc39.es/ecma262/#sec-hostimportmoduledynamically
-ThrowCompletionOr<void> VM::import_module_dynamically(ScriptOrModule referencing_script_or_module, ModuleRequest module_request, PromiseCapability const& promise_capability)
-{
-    auto& realm = *current_realm();
-
-    // Success path:
-    //  - At some future time, the host environment must perform FinishDynamicImport(referencingScriptOrModule, moduleRequest, promiseCapability, promise),
-    //    where promise is a Promise resolved with undefined.
-    //  - Any subsequent call to HostResolveImportedModule after FinishDynamicImport has completed,
-    //    given the arguments referencingScriptOrModule and specifier, must return a normal completion
-    //    containing a module which has already been evaluated, i.e. whose Evaluate concrete method has
-    //    already been called and returned a normal completion.
-    // Failure path:
-    //  - At some future time, the host environment must perform
-    //    FinishDynamicImport(referencingScriptOrModule, moduleRequest, promiseCapability, promise),
-    //    where promise is a Promise rejected with an error representing the cause of failure.
-
-    auto promise = Promise::create(realm);
-
-    ScopeGuard finish_dynamic_import = [&] {
-        host_finish_dynamic_import(referencing_script_or_module, module_request, promise_capability, promise);
-    };
-
-    // Generally within ECMA262 we always get a referencing_script_or_moulde. However, ShadowRealm gives an explicit null.
-    // To get around this is we attempt to get the active script_or_module otherwise we might start loading "random" files from the working directory.
-    if (referencing_script_or_module.has<Empty>()) {
-        referencing_script_or_module = get_active_script_or_module();
-
-        // If there is no ScriptOrModule in any of the execution contexts
-        if (referencing_script_or_module.has<Empty>()) {
-            // Throw an error for now
-            promise->reject(InternalError::create(realm, TRY_OR_THROW_OOM(*this, String::formatted(ErrorType::ModuleNotFoundNoReferencingScript.message(), module_request.module_specifier))));
-            return {};
-        }
-    }
-
-    // Note: If host_resolve_imported_module returns a module it has been loaded successfully and the next call in finish_dynamic_import will retrieve it again.
-    auto module_or_error = host_resolve_imported_module(referencing_script_or_module, module_request);
-    dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] HostImportModuleDynamically(..., {}) -> {}", module_request.module_specifier, module_or_error.is_error() ? "failed" : "passed");
-    if (module_or_error.is_throw_completion()) {
-        promise->reject(*module_or_error.throw_completion().value());
-    } else {
-        auto module = module_or_error.release_value();
-        auto& source_text_module = static_cast<Module&>(*module);
-
-        auto evaluated_or_error = link_and_eval_module(source_text_module);
-
-        if (evaluated_or_error.is_throw_completion()) {
-            promise->reject(*evaluated_or_error.throw_completion().value());
-        } else {
-            promise->fulfill(js_undefined());
-        }
-    }
-
-    // It must return unused.
-    // Note: Just return void always since the resulting value cannot be accessed by user code.
-    return {};
-}
-
-// 16.2.1.9 FinishDynamicImport ( referencingScriptOrModule, specifier, promiseCapability, innerPromise ), https://tc39.es/ecma262/#sec-finishdynamicimport
-void VM::finish_dynamic_import(ScriptOrModule referencing_script_or_module, ModuleRequest module_request, PromiseCapability const& promise_capability, Promise* inner_promise)
-{
-    dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] finish_dynamic_import on {}", module_request.module_specifier);
-
-    auto& realm = *current_realm();
-
-    // 1. Let fulfilledClosure be a new Abstract Closure with parameters (result) that captures referencingScriptOrModule, specifier, and promiseCapability and performs the following steps when called:
-    auto fulfilled_closure = [referencing_script_or_module = move(referencing_script_or_module), module_request = move(module_request), &promise_capability](VM& vm) -> ThrowCompletionOr<Value> {
-        auto result = vm.argument(0);
-        // a. Assert: result is undefined.
-        VERIFY(result.is_undefined());
-        // b. Let moduleRecord be ! HostResolveImportedModule(referencingScriptOrModule, specifier).
-        auto module_record = MUST(vm.host_resolve_imported_module(referencing_script_or_module, module_request));
-
-        // c. Assert: Evaluate has already been invoked on moduleRecord and successfully completed.
-        // Note: If HostResolveImportedModule returns a module evaluate will have been called on it.
-
-        // d. Let namespace be Completion(GetModuleNamespace(moduleRecord)).
-        auto namespace_ = module_record->get_module_namespace(vm);
-
-        // e. If namespace is an abrupt completion, then
-        if (namespace_.is_throw_completion()) {
-            // i. Perform ! Call(promiseCapability.[[Reject]], undefined, « namespace.[[Value]] »).
-            MUST(call(vm, *promise_capability.reject(), js_undefined(), *namespace_.throw_completion().value()));
-        }
-        // f. Else,
-        else {
-            // i. Perform ! Call(promiseCapability.[[Resolve]], undefined, « namespace.[[Value]] »).
-            MUST(call(vm, *promise_capability.resolve(), js_undefined(), namespace_.release_value()));
-        }
-        // g. Return unused.
-        // NOTE: We don't support returning an empty/optional/unused value here.
-        return js_undefined();
-    };
-
-    // 2. Let onFulfilled be CreateBuiltinFunction(fulfilledClosure, 0, "", « »).
-    auto on_fulfilled = NativeFunction::create(realm, move(fulfilled_closure), 0, "");
-
-    // 3. Let rejectedClosure be a new Abstract Closure with parameters (error) that captures promiseCapability and performs the following steps when called:
-    auto rejected_closure = [&promise_capability](VM& vm) -> ThrowCompletionOr<Value> {
-        auto error = vm.argument(0);
-        // a. Perform ! Call(promiseCapability.[[Reject]], undefined, « error »).
-        MUST(call(vm, *promise_capability.reject(), js_undefined(), error));
-
-        // b. Return unused.
-        // NOTE: We don't support returning an empty/optional/unused value here.
-        return js_undefined();
-    };
-
-    // 4. Let onRejected be CreateBuiltinFunction(rejectedClosure, 0, "", « »).
-    auto on_rejected = NativeFunction::create(realm, move(rejected_closure), 0, "");
-
-    // 5. Perform PerformPromiseThen(innerPromise, onFulfilled, onRejected).
-    inner_promise->perform_then(on_fulfilled, on_rejected, {});
-
-    // 6. Return unused.
 }
 
 }

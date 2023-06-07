@@ -14,6 +14,7 @@
 #include <AK/RefCounted.h>
 #include <AK/StackInfo.h>
 #include <AK/Variant.h>
+#include <LibJS/FetchState.h>
 #include <LibJS/Heap/Heap.h>
 #include <LibJS/Heap/MarkedVector.h>
 #include <LibJS/Runtime/CommonPropertyNames.h>
@@ -250,15 +251,12 @@ public:
     ScriptOrModule get_active_script_or_module() const;
 
     Function<ThrowCompletionOr<NonnullGCPtr<Module>>(ScriptOrModule, ModuleRequest const&)> host_resolve_imported_module;
-    Function<ThrowCompletionOr<void>(ScriptOrModule, ModuleRequest, PromiseCapability const&)> host_import_module_dynamically;
-    Function<void(ScriptOrModule, ModuleRequest const&, PromiseCapability const&, Promise*)> host_finish_dynamic_import;
+    Function<void(ScriptOrModuleOrRealm, DeprecatedString, GCPtr<FetchState>, GraphLoadingStateOrPromiseCapability)> host_load_imported_module;
 
     Function<HashMap<PropertyKey, Value>(SourceTextModule const&)> host_get_import_meta_properties;
     Function<void(Object*, SourceTextModule const&)> host_finalize_import_meta;
 
     Function<Vector<DeprecatedString>()> host_get_supported_import_assertions;
-
-    void enable_default_host_import_module_dynamically_hook();
 
     Function<void(Promise&, Promise::RejectionOperation)> host_promise_rejection_tracker;
     Function<ThrowCompletionOr<Value>(JobCallback&, Value, MarkedVector<Value>)> host_call_job_callback;
@@ -285,9 +283,6 @@ private:
 
     ThrowCompletionOr<NonnullGCPtr<Module>> resolve_imported_module(ScriptOrModule referencing_script_or_module, ModuleRequest const& module_request);
     ThrowCompletionOr<void> link_and_eval_module(Module& module);
-
-    ThrowCompletionOr<void> import_module_dynamically(ScriptOrModule referencing_script_or_module, ModuleRequest module_request, PromiseCapability const& promise_capability);
-    void finish_dynamic_import(ScriptOrModule referencing_script_or_module, ModuleRequest module_request, PromiseCapability const& promise_capability, Promise* inner_promise);
 
     void set_well_known_symbols(WellKnownSymbols well_known_symbols) { m_well_known_symbols = move(well_known_symbols); }
 

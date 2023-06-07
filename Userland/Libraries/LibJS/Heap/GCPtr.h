@@ -195,6 +195,19 @@ public:
 
     T* ptr() const { return m_ptr; }
 
+    [[nodiscard]] T* leak_ptr()
+    {
+        T* leaked_ptr = m_ptr;
+        m_ptr = nullptr;
+        return leaked_ptr;
+    }
+
+    NonnullGCPtr<T> release_nonnull()
+    {
+        VERIFY(m_ptr);
+        return NonnullGCPtr<T>(*leak_ptr());
+    }
+
     operator bool() const { return !!m_ptr; }
     bool operator!() const { return !m_ptr; }
 

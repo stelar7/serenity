@@ -23,8 +23,8 @@ public:
 
     virtual ThrowCompletionOr<void> link(VM& vm) override;
     virtual ThrowCompletionOr<Promise*> evaluate(VM& vm) override;
-    virtual ThrowCompletionOr<Vector<DeprecatedFlyString>> get_exported_names(VM& vm, Vector<Module*> export_star_set) override;
-    virtual ThrowCompletionOr<ResolvedBinding> resolve_export(VM& vm, DeprecatedFlyString const& export_name, Vector<ResolvedBinding> resolve_set) override;
+    virtual Vector<DeprecatedFlyString> get_exported_names(VM& vm, Vector<Module*> export_star_set) override;
+    virtual ResolvedBinding resolve_export(VM& vm, DeprecatedFlyString const& export_name, Vector<ResolvedBinding> resolve_set) override;
 
 private:
     SyntheticModule(Vector<DeprecatedFlyString> export_names, EvaluationFunction evaluation_steps, Realm& realm, StringView filename);

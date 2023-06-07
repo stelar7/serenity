@@ -41,6 +41,11 @@ bool validate_and_apply_property_descriptor(Object*, PropertyKey const&, bool ex
 ThrowCompletionOr<Object*> get_prototype_from_constructor(VM&, FunctionObject const& constructor, NonnullGCPtr<Object> (Intrinsics::*intrinsic_default_prototype)());
 Object* create_unmapped_arguments_object(VM&, Span<Value> arguments);
 Object* create_mapped_arguments_object(VM&, FunctionObject&, Vector<FunctionParameter> const&, Span<Value> arguments, Environment&);
+void inner_module_loading(VM& vm, NonnullGCPtr<GraphLoadingState>, NonnullGCPtr<Module>);
+void continue_dynamic_import(VM&, PromiseCapability const&, Completion);
+void continue_module_loading(VM&, NonnullGCPtr<GraphLoadingState>, Completion);
+NonnullGCPtr<Module> get_imported_module(ScriptOrModuleOrRealm, DeprecatedString);
+void finish_loading_imported_module(ScriptOrModuleOrRealm, DeprecatedString, GraphLoadingStateOrPromiseCapability, Completion);
 
 struct DisposableResource {
     Value resource_value;

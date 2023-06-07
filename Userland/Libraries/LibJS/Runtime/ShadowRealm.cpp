@@ -204,9 +204,6 @@ ThrowCompletionOr<Value> perform_shadow_realm_eval(VM& vm, StringView source_tex
 // 3.1.4 ShadowRealmImportValue ( specifierString: a String, exportNameString: a String, callerRealm: a Realm Record, evalRealm: a Realm Record, evalContext: an execution context, ), https://tc39.es/proposal-shadowrealm/#sec-shadowrealmimportvalue
 ThrowCompletionOr<Value> shadow_realm_import_value(VM& vm, DeprecatedString specifier_string, DeprecatedString export_name_string, Realm& caller_realm, Realm& eval_realm, ExecutionContext& eval_context)
 {
-    // FIXME: evalRealm isn't being used anywhere in this AO (spec issue)
-    (void)eval_realm;
-
     auto& realm = *vm.current_realm();
 
     // 1. Assert: evalContext is an execution context associated to a ShadowRealm instance's [[ExecutionContext]].
@@ -221,8 +218,13 @@ ThrowCompletionOr<Value> shadow_realm_import_value(VM& vm, DeprecatedString spec
     // 5. Push evalContext onto the execution context stack; evalContext is now the running execution context.
     TRY(vm.push_execution_context(eval_context, {}));
 
-    // 6. Perform HostImportModuleDynamically(null, specifierString, innerCapability).
-    MUST_OR_THROW_OOM(vm.host_import_module_dynamically(Empty {}, ModuleRequest { move(specifier_string) }, inner_capability));
+    // FIXME: Spec is not updated to use `HostLoadImportedModule` yet.
+    ScriptOrModuleOrRealm referrer = vm.get_active_script_or_module();
+    if (referrer.has<Empty>())
+        referrer = NonnullGCPtr<Realm>(eval_realm);
+
+    // 6. Perform HostLoadImportedModule(_referrer_, _specifierString_, ~empty~, _promiseCapability_).
+    vm.host_load_imported_module(referrer, specifier_string, nullptr, inner_capability);
 
     // 7. Suspend evalContext and remove it from the execution context stack.
     // NOTE: We don't support this concept yet.

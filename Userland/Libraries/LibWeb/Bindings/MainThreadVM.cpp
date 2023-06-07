@@ -400,6 +400,124 @@ ErrorOr<void> initialize_main_thread_vm()
         return JS::NonnullGCPtr(*resolved_module_script.module_script->record());
     };
 
+    // 8.1.6.5.3 HostLoadImportedModule(referrer, moduleRequest, loadState, payload), https://html.spec.whatwg.org/multipage/webappapis.html#hostloadimportedmodule
+    s_main_thread_vm->host_load_imported_module = [](JS::ScriptOrModuleOrRealm referrer, DeprecatedString module_request, GCPtr<FetchState> load_state, JS::GraphLoadingStateOrPromiseCapability payload) -> void {
+        // 1. Let settingsObject be the current settings object.
+        auto& settings_object = HTML::current_settings_object();
+
+        auto& vm = settings_object.global_object().vm();
+
+        /*
+        // FIXME: 2. If settingsObject's global object implements WorkletGlobalScope or ServiceWorkerGlobalScope and loadState is undefined, then:
+        if ((is<HTML::WorkletGlobalScope>(settings_object.global_object()) || is<HTML::ServiceWorkerGlobalScope>(settings_object.global_object())) && !load_state) {
+            // 1. Let completion be Completion Record { [[Type]]: throw, [[Value]]: a new TypeError, [[Target]]: empty }
+            auto error = vm.throw_completion<JS::TypeError>(JS::ErrorType::DynamicImportNotAllowed, "Cannot load module in a worklet or service worker"sv);
+            auto completion = JS::Completion { JS::Completion::Type::Throw, error, {} };
+
+            (void)completion;
+            // 2. FIXME: Perform FinishLoadingImportedModule(referrer, moduleRequest, payload, completion).
+
+            // 3. Return.
+            return;
+        }
+        */
+
+        // 3. Let referencingScript be null.
+        Optional<HTML::Script&> referencing_script;
+
+        // 4. Let fetchOptions be the default classic script fetch options.
+        auto fetch_options = HTML::ClassicScript::default_fetch_options();
+
+        // 5. Let fetchReferrer be "client".
+        auto fetch_referrer = "client"sv;
+
+        // 6. If referrer is a Script Record or a Module Record, then:
+        if (referrer.has<JS::NonnullGCPtr<JS::Script>>() || referrer.has<JS::NonnullGCPtr<JS::Module>>()) {
+            // 1. Set referencingScript to referrer.[[HostDefined]].
+            referencing_script = verify_cast<HTML::Script>(referrer.has<JS::NonnullGCPtr<JS::Script>>() ? *referrer.get<JS::NonnullGCPtr<JS::Script>>()->host_defined() : *referrer.get<JS::NonnullGCPtr<JS::Module>>()->host_defined());
+
+            // 2. Set settingsObject to referencingScript's settings object.
+            settings_object = referencing_script->settings_object();
+
+            // 3. Set fetchOptions to the descendant script fetch options for referencingScript's fetch options.
+            fetch_options = referencing_script->fetch_options().descendant_script_fetch_options();
+
+            // 4. Assert: fetchOptions is not null, as referencingScript is a classic script or a JavaScript module script.
+            VERIFY(fetch_options);
+
+            // 5. If neither of the following conditions are true:
+            //       referrer is a Script Record; or
+            //       referrer is a Module Record and referrer.[[Status]] is one of evaluating, evaluating-async or evaluated,
+            // then set fetchReferrer to referrer's base URL.
+            auto is_script_record = referrer.has<JS::NonnullGCPtr<JS::Script>>();
+            auto is_module_record = referrer.has<JS::NonnullGCPtr<JS::Module>>();
+            auto is_evaluating_module = is_module_record && AK::first_is_one_of(referrer.get<JS::NonnullGCPtr<JS::Module>>()->status(), JS::ModuleStatus::Evaluating, JS::ModuleStatus::EvaluatingAsync, JS::ModuleStatus::Evaluated);
+            if (!(is_script_record || is_evaluating_module))
+                fetch_referrer = referrer.get<JS::NonnullGCPtr<JS::Script>>()->base_url();
+        }
+
+        // 7. Disallow further import maps given settingsObject.
+        settings_object.disallow_further_import_maps();
+
+        // 8. Let url be the result of resolving a module specifier given referencingScript and moduleRequest.[[Specifier]], catching any exceptions. If they throw an exception, let resolutionError be the thrown exception.
+        Optional<JS::ThrowCompletionOr<URL>> resolution_error;
+        auto url = HTML::resolve_module_specifier(referencing_script, module_request, &resolution_error);
+
+        // 9. If the previous step threw an exception, then:
+        if (resolution_error.has_value()) {
+            // 1. Let completion be Completion Record { [[Type]]: throw, [[Value]]: resolutionError, [[Target]]: empty }.
+            auto completion = JS::Completion { JS::Completion::Type::Throw, resolution_error->value(), {} };
+
+            // FIXME: 2. Perform FinishLoadingImportedModule(referrer, moduleRequest, payload, completion).
+
+            // 3. Return.
+            return;
+        }
+
+        // 10. Let destination be "script".
+        auto destination = "script"sv;
+
+        // 11. If loadState is not undefined, then set destination to loadState.[[Destination]].
+        if (load_state)
+            destination = load_state->destination;
+
+        // onSingleFetchComplete given moduleScript is the following algorithm:
+        auto on_single_fetch_complete = [&](JS::GCPtr<Script> module_script) {
+            // 1. Let completion be null.
+            Optional<JS::Completion> completion;
+
+            // 2. If moduleScript is null, then set completion to Completion Record { [[Type]]: throw, [[Value]]: a new TypeError, [[Target]]: empty }.
+            if (!module_script) {
+                auto error = vm.throw_completion<JS::TypeError>(JS::ErrorType::DynamicImportNotAllowed, "Failed to fetch module"sv);
+                completion = JS::Completion { JS::Completion::Type::Throw, error, {} };
+            }
+
+            // 3. Otherwise, if moduleScript's parse error is not null, then:
+            else if (module_script->parse_error()) {
+                // 1. Let parseError be moduleScript's parse error.
+                auto parse_error = module_script->parse_error();
+
+                // 2. Set completion to Completion Record { [[Type]]: throw, [[Value]]: parseError, [[Target]]: empty }.
+                completion = JS::Completion { JS::Completion::Type::Throw, parse_error, {} };
+
+                // 3. If loadState is not undefined and loadState.[[ParseError]] is null, set loadState.[[ParseError]] to parseError.
+                if (load_state && !load_state->parse_error)
+                    load_state->parse_error = parse_error;
+            }
+
+            // 4. Otherwise, set completion to Completion Record { [[Type]]: normal, [[Value]]: result's record, [[Target]]: empty }.
+            else {
+                completion = JS::Completion { JS::Completion::Type::Normal, module_script->record(), {} };
+            }
+
+            // FIXME: 5. Perform FinishLoadingImportedModule(referrer, moduleRequest, payload, completion).
+        };
+
+        // FIXME: 12. Fetch a single imported module script given url, settings object, destination, fetchOptions, fetchReferrer, moduleRequest, and onSingleFetchComplete as defined below.
+        // If loadState is not undefined and loadState.[[PerformFetch]] is not null, pass loadState.[[PerformFetch]] along as well.
+        //fetch_single_imported_module_script(url, settings_object, destination, fetch_options, fetch_referrer, module_request, on_single_fetch_complete, load_state ? load_state->perform_fetch : nullptr);
+    };
+
     return {};
 }
 

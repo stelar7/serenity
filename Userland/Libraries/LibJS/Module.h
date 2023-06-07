@@ -71,13 +71,13 @@ public:
 
     Script::HostDefined* host_defined() const { return m_host_defined; }
 
-    ThrowCompletionOr<Object*> get_module_namespace(VM& vm);
+    Object* get_module_namespace(VM& vm);
 
     virtual ThrowCompletionOr<void> link(VM& vm) = 0;
     virtual ThrowCompletionOr<Promise*> evaluate(VM& vm) = 0;
 
-    virtual ThrowCompletionOr<Vector<DeprecatedFlyString>> get_exported_names(VM& vm, Vector<Module*> export_star_set = {}) = 0;
-    virtual ThrowCompletionOr<ResolvedBinding> resolve_export(VM& vm, DeprecatedFlyString const& export_name, Vector<ResolvedBinding> resolve_set = {}) = 0;
+    virtual Vector<DeprecatedFlyString> get_exported_names(VM& vm, Vector<Module*> export_star_set = {}) = 0;
+    virtual ResolvedBinding resolve_export(VM& vm, DeprecatedFlyString const& export_name, Vector<ResolvedBinding> resolve_set = {}) = 0;
 
     virtual ThrowCompletionOr<u32> inner_module_linking(VM& vm, Vector<Module*>& stack, u32 index);
     virtual ThrowCompletionOr<u32> inner_module_evaluation(VM& vm, Vector<Module*>& stack, u32 index);

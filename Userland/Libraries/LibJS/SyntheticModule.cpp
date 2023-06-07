@@ -23,14 +23,14 @@ SyntheticModule::SyntheticModule(Vector<DeprecatedFlyString> export_names, Synth
 }
 
 // 1.2.3.1 GetExportedNames( exportStarSet ), https://tc39.es/proposal-json-modules/#sec-smr-getexportednames
-ThrowCompletionOr<Vector<DeprecatedFlyString>> SyntheticModule::get_exported_names(VM&, Vector<Module*>)
+Vector<DeprecatedFlyString> SyntheticModule::get_exported_names(VM&, Vector<Module*>)
 {
     // 1. Return module.[[ExportNames]].
     return m_export_names;
 }
 
 // 1.2.3.2 ResolveExport( exportName, resolveSet ), https://tc39.es/proposal-json-modules/#sec-smr-resolveexport
-ThrowCompletionOr<ResolvedBinding> SyntheticModule::resolve_export(VM&, DeprecatedFlyString const& export_name, Vector<ResolvedBinding>)
+ResolvedBinding SyntheticModule::resolve_export(VM&, DeprecatedFlyString const& export_name, Vector<ResolvedBinding>)
 {
     // 1. If module.[[ExportNames]] does not contain exportName, return null.
     if (!m_export_names.contains_slow(export_name))

@@ -6,12 +6,14 @@
 
 #pragma once
 
+#include <LibJS/FetchState.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Module.h>
 
 namespace JS {
 
 enum class ModuleStatus {
+    New,
     Unlinked,
     Linking,
     Linked,
@@ -25,12 +27,17 @@ class CyclicModule : public Module {
     JS_CELL(CyclicModule, Module);
 
 public:
-    // Note: Do not call these methods directly unless you are HostResolveImportedModule.
+    // Note: Do not call these methods directly unless you are ContinueDynamicImport.
     //       Badges cannot be used because other hosts must be able to call this (and it is called recursively)
     virtual ThrowCompletionOr<void> link(VM& vm) override;
     virtual ThrowCompletionOr<Promise*> evaluate(VM& vm) override;
 
+    Promise* load_requested_modules(VM& vm, GCPtr<FetchState>);
+
     Vector<ModuleRequest> const& requested_modules() const { return m_requested_modules; }
+    HashMap<DeprecatedString, NonnullGCPtr<Module>> const& loaded_modules() const { return m_loaded_modules; }
+    ModuleStatus get_status() const { return m_status; }
+    void set_status(ModuleStatus status) { m_status = status; }
 
 protected:
     CyclicModule(Realm& realm, StringView filename, bool has_top_level_await, Vector<ModuleRequest> requested_modules, Script::HostDefined* host_defined);
@@ -48,17 +55,18 @@ protected:
     void async_module_execution_fulfilled(VM& vm);
     void async_module_execution_rejected(VM& vm, Value error);
 
-    ModuleStatus m_status { ModuleStatus::Unlinked };   // [[Status]]
-    ThrowCompletionOr<void> m_evaluation_error;         // [[EvaluationError]]
-    Optional<u32> m_dfs_index;                          // [[DFSIndex]]
-    Optional<u32> m_dfs_ancestor_index;                 // [[DFSAncestorIndex]]
-    Vector<ModuleRequest> m_requested_modules;          // [[RequestedModules]]
-    GCPtr<CyclicModule> m_cycle_root;                   // [[CycleRoot]]
-    bool m_has_top_level_await { false };               // [[HasTLA]]
-    bool m_async_evaluation { false };                  // [[AsyncEvaluation]]
-    GCPtr<PromiseCapability> m_top_level_capability;    // [[TopLevelCapability]]
-    Vector<GCPtr<CyclicModule>> m_async_parent_modules; // [[AsyncParentModules]]
-    Optional<u32> m_pending_async_dependencies;         // [[PendingAsyncDependencies]]
+    ModuleStatus m_status { ModuleStatus::New };                      // [[Status]]
+    ThrowCompletionOr<void> m_evaluation_error;                       // [[EvaluationError]]
+    Optional<u32> m_dfs_index;                                        // [[DFSIndex]]
+    Optional<u32> m_dfs_ancestor_index;                               // [[DFSAncestorIndex]]
+    Vector<ModuleRequest> m_requested_modules;                        // [[RequestedModules]]
+    HashMap<DeprecatedString, NonnullGCPtr<Module>> m_loaded_modules; // [[LoadedModules]]
+    GCPtr<CyclicModule> m_cycle_root;                                 // [[CycleRoot]]
+    bool m_has_top_level_await { false };                             // [[HasTLA]]
+    bool m_async_evaluation { false };                                // [[AsyncEvaluation]]
+    GCPtr<PromiseCapability> m_top_level_capability;                  // [[TopLevelCapability]]
+    Vector<GCPtr<CyclicModule>> m_async_parent_modules;               // [[AsyncParentModules]]
+    Optional<u32> m_pending_async_dependencies;                       // [[PendingAsyncDependencies]]
 };
 
 }

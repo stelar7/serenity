@@ -243,8 +243,9 @@ Result<NonnullGCPtr<SourceTextModule>, Vector<ParserError>> SourceTextModule::pa
     //          [[AsyncEvaluation]]: false, [[TopLevelCapability]]: empty, [[AsyncParentModules]]: « »,
     //          [[PendingAsyncDependencies]]: empty, [[Status]]: unlinked, [[EvaluationError]]: empty,
     //          [[HostDefined]]: hostDefined, [[ECMAScriptCode]]: body, [[Context]]: empty, [[ImportMeta]]: empty,
-    //          [[RequestedModules]]: requestedModules, [[ImportEntries]]: importEntries, [[LocalExportEntries]]: localExportEntries,
-    //          [[IndirectExportEntries]]: indirectExportEntries, [[StarExportEntries]]: starExportEntries, [[DFSIndex]]: empty, [[DFSAncestorIndex]]: empty }.
+    //          [[RequestedModules]]: requestedModules, [[LoadedModules]]: « », [[ImportEntries]]: importEntries,
+    //          [[LocalExportEntries]]: localExportEntries, [[IndirectExportEntries]]: indirectExportEntries,
+    //          [[StarExportEntries]]: starExportEntries, [[DFSIndex]]: empty, [[DFSAncestorIndex]]: empty }.
     return realm.heap().allocate_without_realm<SourceTextModule>(
         realm,
         filename,
@@ -260,13 +261,16 @@ Result<NonnullGCPtr<SourceTextModule>, Vector<ParserError>> SourceTextModule::pa
 }
 
 // 16.2.1.6.2 GetExportedNames ( [ exportStarSet ] ), https://tc39.es/ecma262/#sec-getexportednames
-ThrowCompletionOr<Vector<DeprecatedFlyString>> SourceTextModule::get_exported_names(VM& vm, Vector<Module*> export_star_set)
+Vector<DeprecatedFlyString> SourceTextModule::get_exported_names(VM& vm, Vector<Module*> export_star_set)
 {
     dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] get_export_names of {}", filename());
-    // 1. If exportStarSet is not present, set exportStarSet to a new empty List.
+    // 1. Assert: module.[[Status]] is not new.
+    VERIFY(m_status != ModuleStatus::New);
+
+    // 2. If exportStarSet is not present, set exportStarSet to a new empty List.
     // Note: This is done by default argument
 
-    // 2. If exportStarSet contains module, then
+    // 3. If exportStarSet contains module, then
     if (export_star_set.contains_slow(this)) {
         // a. Assert: We've reached the starting point of an export * circularity.
         // FIXME: How do we check that?
@@ -275,13 +279,13 @@ ThrowCompletionOr<Vector<DeprecatedFlyString>> SourceTextModule::get_exported_na
         return Vector<DeprecatedFlyString> {};
     }
 
-    // 3. Append module to exportStarSet.
+    // 4. Append module to exportStarSet.
     export_star_set.append(this);
 
-    // 4. Let exportedNames be a new empty List.
+    // 5. Let exportedNames be a new empty List.
     Vector<DeprecatedFlyString> exported_names;
 
-    // 5. For each ExportEntry Record e of module.[[LocalExportEntries]], do
+    // 6. For each ExportEntry Record e of module.[[LocalExportEntries]], do
     for (auto& entry : m_local_export_entries) {
         // a. Assert: module provides the direct binding for this export.
         // FIXME: How do we check that?
@@ -290,7 +294,7 @@ ThrowCompletionOr<Vector<DeprecatedFlyString>> SourceTextModule::get_exported_na
         exported_names.empend(entry.export_name);
     }
 
-    // 6. For each ExportEntry Record e of module.[[IndirectExportEntries]], do
+    // 7. For each ExportEntry Record e of module.[[IndirectExportEntries]], do
     for (auto& entry : m_indirect_export_entries) {
         // a. Assert: module provides the direct binding for this export.
         // FIXME: How do we check that?
@@ -299,13 +303,13 @@ ThrowCompletionOr<Vector<DeprecatedFlyString>> SourceTextModule::get_exported_na
         exported_names.empend(entry.export_name);
     }
 
-    // 7. For each ExportEntry Record e of module.[[StarExportEntries]], do
+    // 8. For each ExportEntry Record e of module.[[StarExportEntries]], do
     for (auto& entry : m_star_export_entries) {
-        // a. Let requestedModule be ? HostResolveImportedModule(module, e.[[ModuleRequest]]).
-        auto requested_module = TRY(vm.host_resolve_imported_module(NonnullGCPtr<Module>(*this), entry.module_request()));
+        // a. Let _requestedModule_ be GetImportedModule(_module_, _e_.[[ModuleRequest]]).
+        auto requested_module = get_imported_module(NonnullGCPtr<Module>(*this), entry.module_request().module_specifier);
 
-        // b. Let starNames be ? requestedModule.GetExportedNames(exportStarSet).
-        auto star_names = TRY(requested_module->get_exported_names(vm, export_star_set));
+        // b. Let _starNames_ be _requestedModule_.GetExportedNames(_exportStarSet_).
+        auto star_names = requested_module->get_exported_names(vm, export_star_set);
 
         // c. For each element n of starNames, do
         for (auto& name : star_names) {
@@ -320,7 +324,7 @@ ThrowCompletionOr<Vector<DeprecatedFlyString>> SourceTextModule::get_exported_na
         }
     }
 
-    // 8. Return exportedNames.
+    // 9. Return exportedNames.
     return exported_names;
 }
 
@@ -329,8 +333,8 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
 {
     // 1. For each ExportEntry Record e of module.[[IndirectExportEntries]], do
     for (auto& entry : m_indirect_export_entries) {
-        // a. Let resolution be ? module.ResolveExport(e.[[ExportName]]).
-        auto resolution = TRY(resolve_export(vm, entry.export_name));
+        // a. Let resolution be module.ResolveExport(e.[[ExportName]]).
+        auto resolution = resolve_export(vm, entry.export_name);
         // b. If resolution is null or ambiguous, throw a SyntaxError exception.
         if (!resolution.is_valid())
             return vm.throw_completion<SyntaxError>(ErrorType::InvalidOrAmbiguousExportEntry, entry.export_name);
@@ -355,14 +359,13 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
 
     // 7. For each ImportEntry Record in of module.[[ImportEntries]], do
     for (auto& import_entry : m_import_entries) {
-        // a. Let importedModule be ! HostResolveImportedModule(module, in.[[ModuleRequest]]).
-        auto imported_module = MUST(vm.host_resolve_imported_module(NonnullGCPtr<Module>(*this), import_entry.module_request()));
-        // b. NOTE: The above call cannot fail because imported module requests are a subset of module.[[RequestedModules]], and these have been resolved earlier in this algorithm.
+        // a. Let _importedModule_ be GetImportedModule(_module_, _in_.[[ModuleRequest]]).
+        auto imported_module = get_imported_module(NonnullGCPtr<Module>(*this), import_entry.module_request().module_specifier);
 
         // c. If in.[[ImportName]] is namespace-object, then
         if (import_entry.is_namespace) {
             // i. Let namespace be ? GetModuleNamespace(importedModule).
-            auto* namespace_ = TRY(imported_module->get_module_namespace(vm));
+            auto* namespace_ = imported_module->get_module_namespace(vm);
 
             // ii. Perform ! env.CreateImmutableBinding(in.[[LocalName]], true).
             MUST(environment->create_immutable_binding(vm, import_entry.local_name, true));
@@ -373,7 +376,7 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
         // d. Else,
         else {
             // i. Let resolution be ? importedModule.ResolveExport(in.[[ImportName]]).
-            auto resolution = TRY(imported_module->resolve_export(vm, import_entry.import_name));
+            auto resolution = imported_module->resolve_export(vm, import_entry.import_name);
 
             // ii. If resolution is null or ambiguous, throw a SyntaxError exception.
             if (!resolution.is_valid())
@@ -382,7 +385,7 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
             // iii. If resolution.[[BindingName]] is namespace, then
             if (resolution.is_namespace()) {
                 // 1. Let namespace be ? GetModuleNamespace(resolution.[[Module]]).
-                auto* namespace_ = TRY(resolution.module->get_module_namespace(vm));
+                auto* namespace_ = resolution.module->get_module_namespace(vm);
 
                 // 2. Perform ! env.CreateImmutableBinding(in.[[LocalName]], true).
                 MUST(environment->create_immutable_binding(vm, import_entry.local_name, true));
@@ -523,12 +526,15 @@ ThrowCompletionOr<void> SourceTextModule::initialize_environment(VM& vm)
 }
 
 // 16.2.1.6.3 ResolveExport ( exportName [ , resolveSet ] ), https://tc39.es/ecma262/#sec-resolveexport
-ThrowCompletionOr<ResolvedBinding> SourceTextModule::resolve_export(VM& vm, DeprecatedFlyString const& export_name, Vector<ResolvedBinding> resolve_set)
+ResolvedBinding SourceTextModule::resolve_export(VM& vm, DeprecatedFlyString const& export_name, Vector<ResolvedBinding> resolve_set)
 {
-    // 1. If resolveSet is not present, set resolveSet to a new empty List.
+    // 1. Assert: module.[[Status]] is not new.
+    VERIFY(m_status != ModuleStatus::New);
+
+    // 2. If resolveSet is not present, set resolveSet to a new empty List.
     // Note: This is done by the default argument.
 
-    // 2. For each Record { [[Module]], [[ExportName]] } r of resolveSet, do
+    // 3. For each Record { [[Module]], [[ExportName]] } r of resolveSet, do
     for (auto& [type, module, exported_name] : resolve_set) {
         // a. If module and r.[[Module]] are the same Module Record and SameValue(exportName, r.[[ExportName]]) is true, then
         if (module == this && exported_name == export_name) {
@@ -539,10 +545,10 @@ ThrowCompletionOr<ResolvedBinding> SourceTextModule::resolve_export(VM& vm, Depr
         }
     }
 
-    // 3. Append the Record { [[Module]]: module, [[ExportName]]: exportName } to resolveSet.
+    // 4. Append the Record { [[Module]]: module, [[ExportName]]: exportName } to resolveSet.
     resolve_set.append({ ResolvedBinding::Type::BindingName, this, export_name });
 
-    // 4. For each ExportEntry Record e of module.[[LocalExportEntries]], do
+    // 5. For each ExportEntry Record e of module.[[LocalExportEntries]], do
     for (auto& entry : m_local_export_entries) {
         // a. If SameValue(exportName, e.[[ExportName]]) is true, then
         if (export_name != entry.export_name)
@@ -559,14 +565,14 @@ ThrowCompletionOr<ResolvedBinding> SourceTextModule::resolve_export(VM& vm, Depr
         };
     }
 
-    // 5. For each ExportEntry Record e of module.[[IndirectExportEntries]], do
+    // 6. For each ExportEntry Record e of module.[[IndirectExportEntries]], do
     for (auto& entry : m_indirect_export_entries) {
         // a. If SameValue(exportName, e.[[ExportName]]) is true, then
         if (export_name != entry.export_name)
             continue;
 
-        // i. Let importedModule be ? HostResolveImportedModule(module, e.[[ModuleRequest]]).
-        auto imported_module = TRY(vm.host_resolve_imported_module(NonnullGCPtr<Module>(*this), entry.module_request()));
+        // i. Let _importedModule_ be GetImportedModule(_module_, _e_.[[ModuleRequest]]).
+        auto imported_module = get_imported_module(NonnullGCPtr<Module>(*this), entry.module_request().module_specifier);
 
         // ii. If e.[[ImportName]] is all, then
         if (entry.kind == ExportEntry::Kind::ModuleRequestAll) {
@@ -590,7 +596,7 @@ ThrowCompletionOr<ResolvedBinding> SourceTextModule::resolve_export(VM& vm, Depr
         }
     }
 
-    // 6. If SameValue(exportName, "default") is true, then
+    // 7. If SameValue(exportName, "default") is true, then
     if (export_name == "default"sv) {
         // a. Assert: A default export was not explicitly defined by this module.
         // FIXME: What does this mean? / How do we check this
@@ -600,16 +606,16 @@ ThrowCompletionOr<ResolvedBinding> SourceTextModule::resolve_export(VM& vm, Depr
         // c. NOTE: A default export cannot be provided by an export * from "mod" declaration.
     }
 
-    // 7. Let starResolution be null.
+    // 8. Let starResolution be null.
     ResolvedBinding star_resolution = ResolvedBinding::null();
 
-    // 8. For each ExportEntry Record e of module.[[StarExportEntries]], do
+    // 9. For each ExportEntry Record e of module.[[StarExportEntries]], do
     for (auto& entry : m_star_export_entries) {
-        // a. Let importedModule be ? HostResolveImportedModule(module, e.[[ModuleRequest]]).
-        auto imported_module = TRY(vm.host_resolve_imported_module(NonnullGCPtr<Module>(*this), entry.module_request()));
+        // a. Let _importedModule_ be GetImportedModule(_module_, _e_.[[ModuleRequest]]).
+        auto imported_module = get_imported_module(NonnullGCPtr<Module>(*this), entry.module_request().module_specifier);
 
-        // b. Let resolution be ? importedModule.ResolveExport(exportName, resolveSet).
-        auto resolution = TRY(imported_module->resolve_export(vm, export_name, resolve_set));
+        // b. Let _resolution_ be _importedModule_.ResolveExport(_exportName_, _resolveSet_).
+        auto resolution = imported_module->resolve_export(vm, export_name, resolve_set);
 
         // c. If resolution is ambiguous, return ambiguous.
         if (resolution.is_ambiguous())
@@ -647,7 +653,7 @@ ThrowCompletionOr<ResolvedBinding> SourceTextModule::resolve_export(VM& vm, Depr
         }
     }
 
-    // 9. Return starResolution.
+    // 10. Return starResolution.
     return star_resolution;
 }
 

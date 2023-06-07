@@ -7,6 +7,7 @@
 #include <AK/Debug.h>
 #include <AK/TypeCasts.h>
 #include <LibJS/CyclicModule.h>
+#include <LibJS/GraphLoadingState.h>
 #include <LibJS/Runtime/ModuleRequest.h>
 #include <LibJS/Runtime/PromiseCapability.h>
 #include <LibJS/Runtime/PromiseConstructor.h>
@@ -30,12 +31,14 @@ void CyclicModule::visit_edges(Cell::Visitor& visitor)
         visitor.visit(module);
 }
 
-// 16.2.1.5.1 Link ( ), https://tc39.es/ecma262/#sec-moduledeclarationlinking
+// 16.2.1.5.2 Link ( ), https://tc39.es/ecma262/#sec-moduledeclarationlinking
 ThrowCompletionOr<void> CyclicModule::link(VM& vm)
 {
     dbgln_if(JS_MODULE_DEBUG, "[JS MODULE] link[{}]()", this);
-    // 1. Assert: module.[[Status]] is not linking or evaluating.
-    VERIFY(m_status != ModuleStatus::Linking && m_status != ModuleStatus::Evaluating);
+
+    // 1. Assert: module.[[Status]] is one of unlinked, linked, evaluating-async, or evaluated.
+    VERIFY(m_status == ModuleStatus::Unlinked || m_status == ModuleStatus::Linked || m_status == ModuleStatus::EvaluatingAsync || m_status == ModuleStatus::Evaluated);
+
     // 2. Let stack be a new empty List.
     Vector<Module*> stack;
 
@@ -115,11 +118,9 @@ ThrowCompletionOr<u32> CyclicModule::inner_module_linking(VM& vm, Vector<Module*
 #endif
 
     // 9. For each String required of module.[[RequestedModules]], do
-    for (auto& required_string : m_requested_modules) {
-        ModuleRequest required { required_string };
-
-        // a. Let requiredModule be ? HostResolveImportedModule(module, required).
-        auto required_module = TRY(vm.host_resolve_imported_module(NonnullGCPtr<Module>(*this), required));
+    for (auto& required : m_requested_modules) {
+        // a. Let _requiredModule_ be GetImportedModule(_module_, _required_).
+        auto required_module = get_imported_module(NonnullGCPtr<Module>(*this), required.module_specifier);
 
         // b. Set index to ? InnerModuleLinking(requiredModule, stack, index).
         index = TRY(required_module->inner_module_linking(vm, stack, index));
@@ -324,9 +325,8 @@ ThrowCompletionOr<u32> CyclicModule::inner_module_evaluation(VM& vm, Vector<Modu
     // 11. For each String required of module.[[RequestedModules]], do
     for (auto& required : m_requested_modules) {
 
-        // a. Let requiredModule be ! HostResolveImportedModule(module, required).
-        auto* required_module = MUST(vm.host_resolve_imported_module(NonnullGCPtr<Module>(*this), required)).ptr();
-        // b. NOTE: Link must be completed successfully prior to invoking this method, so every requested module is guaranteed to resolve successfully.
+        // a. Let _requiredModule_ be GetImportedModule(_module_, _required_).
+        auto required_module = get_imported_module(NonnullGCPtr<Module>(*this), required.module_specifier);
 
         // c. Set index to ? InnerModuleEvaluation(requiredModule, stack, index).
         index = TRY(required_module->inner_module_evaluation(vm, stack, index));
@@ -335,7 +335,7 @@ ThrowCompletionOr<u32> CyclicModule::inner_module_evaluation(VM& vm, Vector<Modu
         if (!is<CyclicModule>(*required_module))
             continue;
 
-        auto* cyclic_module = static_cast<CyclicModule*>(required_module);
+        auto* cyclic_module = static_cast<CyclicModule*>(required_module.ptr());
         // i. Assert: requiredModule.[[Status]] is either evaluating, evaluating-async, or evaluated.
         VERIFY(cyclic_module->m_status == ModuleStatus::Evaluating || cyclic_module->m_status == ModuleStatus::EvaluatingAsync || cyclic_module->m_status == ModuleStatus::Evaluated);
 
@@ -669,6 +669,26 @@ void CyclicModule::async_module_execution_rejected(VM& vm, Value error)
     }
 
     // 9. Return unused.
+}
+
+// https://tc39.es/ecma262/multipage/ecmascript-language-scripts-and-modules.html#sec-LoadRequestedModules
+Promise* CyclicModule::load_requested_modules(VM& vm, GCPtr<FetchState> host_defined)
+{
+    auto& realm = *vm.current_realm();
+    // 1. If hostDefined is not present, let hostDefined be empty.
+
+    // 2. Let pc be ! NewPromiseCapability(%Promise%).
+    auto pc = MUST(new_promise_capability(vm, realm.intrinsics().promise_constructor()));
+
+    // 3. Let state be the GraphLoadingState Record { [[IsLoading]]: true, [[PendingModulesCount]]: 1, [[Visited]]: « », [[PromiseCapability]]: pc, [[HostDefined]]: hostDefined }.
+    auto state_impl = GraphLoadingState(pc, true, 1, {}, host_defined);
+    auto state = NonnullGCPtr<GraphLoadingState>(state_impl);
+
+    // 4. Perform InnerModuleLoading(state, module).
+    inner_module_loading(vm, state, NonnullGCPtr<Module>(*this));
+
+    // 5. Return pc.[[Promise]].
+    return verify_cast<Promise>(pc->promise().ptr());
 }
 
 }

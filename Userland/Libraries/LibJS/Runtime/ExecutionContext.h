@@ -18,7 +18,9 @@
 
 namespace JS {
 
+using GraphLoadingStateOrPromiseCapability = Variant<Empty, NonnullGCPtr<GraphLoadingState>, NonnullGCPtr<JS::PromiseCapability>>;
 using ScriptOrModule = Variant<Empty, NonnullGCPtr<Script>, NonnullGCPtr<Module>>;
+using ScriptOrModuleOrRealm = Variant<Empty, NonnullGCPtr<Script>, NonnullGCPtr<Module>, NonnullGCPtr<Realm>>;
 
 // 9.4 Execution Contexts, https://tc39.es/ecma262/#sec-execution-contexts
 struct ExecutionContext {

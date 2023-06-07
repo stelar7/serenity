@@ -34,13 +34,16 @@ public:
     HostDefined* host_defined() const { return m_host_defined; }
     StringView filename() const { return m_filename; }
 
+    HashMap<DeprecatedString, NonnullGCPtr<Module>> const& loaded_modules() const { return m_loaded_modules; }
+
 private:
     Script(Realm&, StringView filename, NonnullRefPtr<Program>, HostDefined* = nullptr);
 
     virtual void visit_edges(Cell::Visitor&) override;
 
-    GCPtr<Realm> m_realm;                // [[Realm]]
-    NonnullRefPtr<Program> m_parse_node; // [[ECMAScriptCode]]
+    GCPtr<Realm> m_realm;                                             // [[Realm]]
+    NonnullRefPtr<Program> m_parse_node;                              // [[ECMAScriptCode]]
+    HashMap<DeprecatedString, NonnullGCPtr<Module>> m_loaded_modules; // [[LoadedModules]]
 
     // Needed for potential lookups of modules.
     DeprecatedString m_filename;

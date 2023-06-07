@@ -11,6 +11,7 @@
 #include <AK/Optional.h>
 #include <AK/Utf16View.h>
 #include <LibJS/Bytecode/Interpreter.h>
+#include <LibJS/GraphLoadingState.h>
 #include <LibJS/Interpreter.h>
 #include <LibJS/Parser.h>
 #include <LibJS/Runtime/AbstractOperations.h>
@@ -27,6 +28,7 @@
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Object.h>
 #include <LibJS/Runtime/ObjectEnvironment.h>
+#include <LibJS/Runtime/PromiseCapability.h>
 #include <LibJS/Runtime/PropertyDescriptor.h>
 #include <LibJS/Runtime/PropertyKey.h>
 #include <LibJS/Runtime/ProxyObject.h>
@@ -1470,6 +1472,257 @@ Completion dispose_resources(VM& vm, GCPtr<DeclarativeEnvironment> disposable, C
 
     // 2. Return completion.
     return completion;
+}
+
+// 13.3.10.1.1 ContinueDynamicImport ( promiseCapability, moduleCompletion ) https://tc39.es/ecma262/#sec-ContinueDynamicImport
+void continue_dynamic_import(VM& vm, PromiseCapability const& promise_capability, Completion module_completion)
+{
+    auto& realm = *vm.current_realm();
+
+    // 1. If moduleCompletion is an abrupt completion, then
+    if (module_completion.is_abrupt()) {
+        // a. Perform ! Call(promiseCapability.[[Reject]], undefined, « moduleCompletion.[[Value]] »).
+        MUST(call(vm, *promise_capability.reject(), js_undefined(), module_completion.value().value()));
+
+        // b. Return unused.
+        return;
+    }
+
+    // 2. Let module be moduleCompletion.[[Value]].
+    auto module = static_cast<CyclicModule*>(&module_completion.value().value().as_cell());
+
+    // 3. Let loadPromise be module.LoadRequestedModules().
+    auto load_promise = module->load_requested_modules(vm, nullptr);
+
+    // 4. Let rejectedClosure be a new Abstract Closure with parameters (reason) that captures promiseCapability and performs the following steps when called:
+    auto rejected_closure = [&promise_capability](VM& vm) -> ThrowCompletionOr<Value> {
+        // a. Perform ! Call(promiseCapability.[[Reject]], undefined, « reason »).
+        MUST(call(vm, *promise_capability.reject(), js_undefined(), vm.argument(0)));
+
+        // b. Return unused.
+        return js_undefined();
+    };
+
+    // 5. Let onRejected be CreateBuiltinFunction(rejectedClosure, 1, "", « »).
+    auto on_rejected = NativeFunction::create(realm, move(rejected_closure), 1, "");
+
+    // 6. Let linkAndEvaluateClosure be a new Abstract Closure with no parameters that captures module, promiseCapability, and onRejected and performs the following steps when called:
+    auto link_and_evaluate_closure = [module, &promise_capability, on_rejected](VM& vm) -> ThrowCompletionOr<Value> {
+        auto& closure_realm = *vm.current_realm();
+
+        // a. Let link be Completion(module.Link()).
+        auto link_result = module->link(vm);
+        Completion link = link_result.is_throw_completion() ? link_result.throw_completion() : normal_completion({});
+
+        // b. If link is an abrupt completion, then
+        if (link.is_abrupt()) {
+            // i. Perform ! Call(promiseCapability.[[Reject]], undefined, « link.[[Value]] »).
+            MUST(call(vm, *promise_capability.reject(), js_undefined(), link.value().value()));
+
+            // ii. Return unused.
+            return Value {};
+        }
+
+        // c. Let evaluatePromise be module.Evaluate().
+        auto evaluate_promise = MUST(module->evaluate(vm));
+
+        // d. Let fulfilledClosure be a new Abstract Closure with no parameters that captures module and promiseCapability and performs the following steps when called:
+        auto fulfilled_closure = [module, &promise_capability](VM& vm) -> ThrowCompletionOr<Value> {
+            // i. Let namespace be GetModuleNamespace(module).
+            auto namespace_ = module->get_module_namespace(vm);
+
+            // ii. Perform ! Call(promiseCapability.[[Resolve]], undefined, « namespace »).
+            MUST(call(vm, *promise_capability.resolve(), js_undefined(), namespace_));
+
+            // iii. Return unused.
+            return Value {};
+        };
+
+        // e. Let onFulfilled be CreateBuiltinFunction(fulfilledClosure, 0, "", « »).
+        auto on_fulfilled = NativeFunction::create(closure_realm, move(fulfilled_closure), 0, "");
+
+        // f. Perform PerformPromiseThen(evaluatePromise, onFulfilled, onRejected).
+        evaluate_promise->perform_then(on_fulfilled, on_rejected, {});
+
+        // g. Return unused.
+        return Value {};
+    };
+
+    // 7. Let linkAndEvaluate be CreateBuiltinFunction(linkAndEvaluateClosure, 0, "", « »).
+    auto link_and_evaluate = NativeFunction::create(realm, move(link_and_evaluate_closure), 0, "");
+
+    // 8. Perform PerformPromiseThen(loadPromise, linkAndEvaluate, onRejected).
+    load_promise->perform_then(link_and_evaluate, on_rejected, {});
+
+    // 9. Return unused.
+    return;
+}
+
+// 16.2.1.7 GetImportedModule ( referrer, specifier ) https://tc39.es/ecma262/#sec-GetImportedModule
+NonnullGCPtr<Module> get_imported_module(ScriptOrModuleOrRealm referrer, DeprecatedString specifier)
+{
+    auto loaded_modules = referrer.visit(
+        [](NonnullGCPtr<JS::Module> module) {
+            if (is<CyclicModule>(*module))
+                return static_cast<CyclicModule&>(*module).loaded_modules();
+
+            return HashMap<DeprecatedString, NonnullGCPtr<JS::Module>> {};
+        },
+        [](Empty) { return HashMap<DeprecatedString, NonnullGCPtr<JS::Module>> {}; },
+        [](auto& any) { return any->loaded_modules(); });
+
+    // 1. Assert: Exactly one element of referrer.[[LoadedModules]] is a Record whose [[Specifier]] is specifier, since LoadRequestedModules has completed successfully on referrer prior to invoking this abstract operation.
+    VERIFY(loaded_modules.contains(specifier));
+
+    // 2. Let record be the Record in referrer.[[LoadedModules]] whose [[Specifier]] is specifier.
+    auto record = loaded_modules.get(specifier);
+
+    // 3. Return record.[[Module]].
+    return record.value();
+}
+
+// https://tc39.es/ecma262/multipage/ecmascript-language-scripts-and-modules.html#sec-InnerModuleLoading
+void inner_module_loading(VM& vm, NonnullGCPtr<GraphLoadingState> state, NonnullGCPtr<Module> input_module)
+{
+    // 1. Assert: state.[[IsLoading]] is true.
+    VERIFY(state->is_loading());
+
+    // 2. If module is a Cyclic Module Record, module.[[Status]] is new, and state.[[Visited]] does not contain module, then
+    if (is<CyclicModule>(*input_module)) {
+        auto& module = static_cast<CyclicModule&>(*input_module);
+
+        if (module.get_status() == ModuleStatus::New && !state->is_visited(input_module)) {
+            // a. Append module to state.[[Visited]].
+            state->add_visited(input_module);
+
+            // b. Let requestedModulesCount be the number of elements in module.[[RequestedModules]].
+            auto requested_modules_count = module.requested_modules().size();
+
+            // c. Set state.[[PendingModulesCount]] to state.[[PendingModulesCount]] + requestedModulesCount.
+            state->set_pending_modules_count(state->pending_modules_count() + requested_modules_count);
+
+            // d. For each String required of module.[[RequestedModules]], do
+            for (auto required : module.requested_modules()) {
+                // i. If module.[[LoadedModules]] contains a Record whose [[Specifier]] is required, then
+                if (module.loaded_modules().contains(required.module_specifier)) {
+                    // 1. Let record be that Record.
+                    auto record = module.loaded_modules().get(required.module_specifier);
+
+                    // 2. Perform InnerModuleLoading(state, record.[[Module]]).
+                    inner_module_loading(vm, state, record.value());
+                } else {
+                    // ii. Else
+                    // 1. Perform HostLoadImportedModule(module, required, state.[[HostDefined]], state).
+                    vm.host_load_imported_module(move(input_module), required.module_specifier, state->host_defined(), move(state));
+                    // 2. NOTE: HostLoadImportedModule will call FinishLoadingImportedModule, which re-enters the graph loading process through ContinueModuleLoading.
+                }
+
+                // iii. If state.[[IsLoading]] is false, return unused.
+                if (!state->is_loading())
+                    return;
+            }
+        }
+    }
+    // 3. Assert: state.[[PendingModulesCount]] ≥ 1.
+    VERIFY(state->pending_modules_count() >= 1);
+
+    // 4. Set state.[[PendingModulesCount]] to state.[[PendingModulesCount]] - 1.
+    state->set_pending_modules_count(state->pending_modules_count() - 1);
+
+    // 5. If state.[[PendingModulesCount]] = 0, then
+    if (state->pending_modules_count() == 0) {
+        // a. Set state.[[IsLoading]] to false.
+        state->set_loading(false);
+
+        // b. For each Cyclic Module Record loaded of state.[[Visited]], do
+        for (auto module : state->visited()) {
+            if (!is<CyclicModule>(*module))
+                continue;
+
+            auto& loaded = static_cast<CyclicModule&>(*module);
+
+            // i. If loaded.[[Status]] is new, set loaded.[[Status]] to unlinked.
+            if (loaded.get_status() == ModuleStatus::New)
+                loaded.set_status(ModuleStatus::Unlinked);
+        }
+
+        // c. Perform ! Call(state.[[PromiseCapability]].[[Resolve]], undefined, « undefined »).
+        MUST(call(vm, *state->promise_capability()->resolve(), js_undefined(), js_undefined()));
+    }
+
+    // 6. Return unused.
+}
+
+void continue_module_loading(VM& vm, NonnullGCPtr<GraphLoadingState> state, Completion module_completion)
+{
+    // 1. If state.[[IsLoading]] is false, return unused.
+    if (!state->is_loading())
+        return;
+
+    // 2. If moduleCompletion is a normal completion, then
+    if (!module_completion.is_abrupt()) {
+        // a. Perform InnerModuleLoading(state, moduleCompletion.[[Value]]).
+        auto completion_value = module_completion.value().value();
+        auto cell = &completion_value.as_cell();
+        auto module = static_cast<Module*>(cell);
+        inner_module_loading(vm, move(state), NonnullGCPtr<Module>(*module));
+    } else {
+        // 3. Else,
+        // a. Set state.[[IsLoading]] to false.
+        state->set_loading(false);
+
+        // b. Perform ! Call(state.[[PromiseCapability]].[[Reject]], undefined, « moduleCompletion.[[Value]] »).
+        MUST(call(vm, *state->promise_capability()->reject(), js_undefined(), module_completion.value().value()));
+    }
+
+    // 4. Return unused.
+}
+
+// 16.2.1.9 FinishLoadingImportedModule ( referrer, specifier, payload, result ) https://tc39.es/ecma262/#sec-FinishLoadingImportedModule
+void finish_loading_imported_module(ScriptOrModuleOrRealm referrer, DeprecatedString specifier, GraphLoadingStateOrPromiseCapability payload, Completion result)
+{
+    // 1. If result is a normal completion, then
+    if (!result.is_abrupt()) {
+        auto completion_value = result.value().value();
+        auto cell = &completion_value.as_cell();
+        auto module_result = NonnullGCPtr(*static_cast<Module*>(cell));
+
+        auto loaded_modules = referrer.visit(
+            [](NonnullGCPtr<JS::Module> module) {
+                if (is<CyclicModule>(*module))
+                    return static_cast<CyclicModule&>(*module).loaded_modules();
+
+                return HashMap<DeprecatedString, NonnullGCPtr<JS::Module>> {};
+            },
+            [](Empty) { return HashMap<DeprecatedString, NonnullGCPtr<JS::Module>> {}; },
+            [](auto& any) { return any->loaded_modules(); });
+
+        // a. If referrer.[[LoadedModules]] contains a Record whose [[Specifier]] is specifier, then
+        if (loaded_modules.contains(specifier)) {
+            // i. Assert: That Record's [[Module]] is result.[[Value]].
+            VERIFY(loaded_modules.get(specifier).value() == module_result);
+        }
+
+        // b. Else
+        else {
+            // i. Append the Record { [[Specifier]]: specifier, [[Module]]: result.[[Value]] } to referrer.[[LoadedModules]].
+            loaded_modules.set(specifier, module_result);
+        }
+    }
+
+    // 2. If payload is a GraphLoadingState Record, then
+    if (payload.has<NonnullGCPtr<GraphLoadingState>>()) {
+        // a. Perform ContinueModuleLoading(payload, result).
+        continue_module_loading(payload.get<NonnullGCPtr<GraphLoadingState>>()->vm(), payload.get<NonnullGCPtr<GraphLoadingState>>(), result);
+    }
+
+    // 3. Else,
+    else {
+        // a. Perform ContinueDynamicImport(payload, result).
+        continue_dynamic_import(payload.get<NonnullGCPtr<PromiseCapability>>()->vm(), payload.get<NonnullGCPtr<PromiseCapability>>(), result);
+    }
+
+    // 4. Return unused.
 }
 
 }

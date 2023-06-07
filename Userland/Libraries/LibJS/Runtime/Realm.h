@@ -8,6 +8,7 @@
 #pragma once
 
 #include <AK/Badge.h>
+#include <AK/HashMap.h>
 #include <AK/OwnPtr.h>
 #include <AK/StringView.h>
 #include <AK/Weakable.h>
@@ -48,15 +49,18 @@ public:
     HostDefined* host_defined() { return m_host_defined; }
     void set_host_defined(OwnPtr<HostDefined> host_defined) { m_host_defined = move(host_defined); }
 
+    HashMap<DeprecatedString, NonnullGCPtr<Module>> const& loaded_modules() const { return m_loaded_modules; }
+
 private:
     Realm() = default;
 
     virtual void visit_edges(Visitor&) override;
 
-    GCPtr<Intrinsics> m_intrinsics;                // [[Intrinsics]]
-    GCPtr<Object> m_global_object;                 // [[GlobalObject]]
-    GCPtr<GlobalEnvironment> m_global_environment; // [[GlobalEnv]]
-    OwnPtr<HostDefined> m_host_defined;            // [[HostDefined]]
+    GCPtr<Intrinsics> m_intrinsics;                                   // [[Intrinsics]]
+    GCPtr<Object> m_global_object;                                    // [[GlobalObject]]
+    GCPtr<GlobalEnvironment> m_global_environment;                    // [[GlobalEnv]]
+    OwnPtr<HostDefined> m_host_defined;                               // [[HostDefined]]
+    HashMap<DeprecatedString, NonnullGCPtr<Module>> m_loaded_modules; // [[LoadedModules]]
 };
 
 }
