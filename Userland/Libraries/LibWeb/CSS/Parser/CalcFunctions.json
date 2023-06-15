@@ -1,0 +1,93 @@
+[
+  {
+    "name": "min",
+    "parameters": ["∞"]
+  },
+  {
+    "name": "max",
+    "parameters": ["∞"]
+  },
+  {
+    "name": "clamp",
+    "parameters": ["min", "center", "max"]
+  },
+  {
+    "name": "round",
+    "parameters": ["KEYWORD?", "x", "y"],
+    "keywords": [["nearest", "up", "down", "to-zero"]]
+  },
+  {
+    "name": "mod",
+    "parameters": ["x", "y"]
+  },
+  {
+    "name": "rem",
+    "parameters": ["x", "y"]
+  },
+  {
+    "name": "sin",
+    "parameters": ["x"],
+    "valid_types": ["number", "angle"]
+  },
+  {
+    "name": "cos",
+    "parameters": ["x"],
+    "valid_types": ["number", "angle"]
+  },
+  {
+    "name": "tan",
+    "parameters": ["x"],
+    "valid_types": ["number", "angle"]
+  },
+  {
+    "name": "asin",
+    "parameters": ["x"],
+    "valid_types": ["number"]
+  },
+  {
+    "name": "acos",
+    "parameters": ["x"],
+    "valid_types": ["number"]
+  },
+  {
+    "name": "atan",
+    "parameters": ["x"],
+    "valid_types": ["number"]
+  },
+  {
+    "name": "atan2",
+    "parameters": ["y", "x"]
+  },
+  {
+    "name": "pow",
+    "parameters": ["x", "y"],
+    "valid_types": ["number"]
+  },
+  {
+    "name": "sqrt",
+    "parameters": ["x"],
+    "valid_types": ["number"]
+  },
+  {
+    "name": "hypot",
+    "parameters": ["∞"]
+  },
+  {
+    "name": "log",
+    "parameters": ["x", "b?"],
+    "valid_types": ["number"]
+  },
+  {
+    "name": "exp",
+    "parameters": ["x"],
+    "valid_types": ["number"]
+  },
+  {
+    "name": "abs",
+    "parameters": ["x"]
+  },
+  {
+    "name": "sign",
+    "parameters": ["x"]
+  }
+]
