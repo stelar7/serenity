@@ -8755,6 +8755,7 @@ public:
     virtual ErrorOr<String> to_string() const override { VERIFY_NOT_REACHED(); }
     virtual Optional<CalculatedStyleValue::ResolvedType> resolved_type() const override { VERIFY_NOT_REACHED(); }
     virtual bool contains_percentage() const override { VERIFY_NOT_REACHED(); }
+    virtual bool contains_relative_length() const override { VERIFY_NOT_REACHED(); }
     virtual CalculatedStyleValue::CalculationResult resolve(Optional<Length::ResolutionContext const&>, CalculatedStyleValue::PercentageBasis const&) const override { VERIFY_NOT_REACHED(); }
 
     virtual ErrorOr<void> dump(StringBuilder& builder, int indent) const override
@@ -8993,8 +8994,8 @@ ErrorOr<OwnPtr<CalculationNode>> Parser::parse_a_calculation(Vector<ComponentVal
     if (parsing_failed_for_child_node)
         return nullptr;
 
-    // FIXME: 6. Return the result of simplifying a calculation tree from values.
-    return single_value.release_value();
+    // 6. Return the result of simplifying a calculation tree from values.
+    return CalculatedStyleValue::simplify_a_calculation(single_value.release_value(), {}, {});
 }
 
 bool Parser::has_ignored_vendor_prefix(StringView string)
