@@ -98,7 +98,8 @@ enum ClientVerificationStaus {
     C(true, CipherSuite::TLS_DHE_RSA_WITH_AES_128_GCM_SHA256, KeyExchangeAlgorithm::DHE_RSA, CipherAlgorithm::AES_128_GCM, Crypto::Hash::SHA256, 8, true)     \
     C(true, CipherSuite::TLS_DHE_RSA_WITH_AES_256_GCM_SHA384, KeyExchangeAlgorithm::DHE_RSA, CipherAlgorithm::AES_256_GCM, Crypto::Hash::SHA384, 8, true)     \
     C(true, CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, KeyExchangeAlgorithm::ECDHE_RSA, CipherAlgorithm::AES_128_GCM, Crypto::Hash::SHA256, 8, true) \
-    C(true, CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, KeyExchangeAlgorithm::ECDHE_RSA, CipherAlgorithm::AES_256_GCM, Crypto::Hash::SHA384, 8, true)
+    C(true, CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, KeyExchangeAlgorithm::ECDHE_RSA, CipherAlgorithm::AES_256_GCM, Crypto::Hash::SHA384, 8, true) \
+    C(true, CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, KeyExchangeAlgorithm::ECDHE_ECDSA, CipherAlgorithm::AES_128_GCM, Crypto::Hash::SHA256, 8, true)
 
 constexpr KeyExchangeAlgorithm get_key_exchange_algorithm(CipherSuite suite)
 {
@@ -161,7 +162,8 @@ struct Options {
         { HashAlgorithm::SHA512, SignatureAlgorithm::RSA },
         { HashAlgorithm::SHA384, SignatureAlgorithm::RSA },
         { HashAlgorithm::SHA256, SignatureAlgorithm::RSA },
-        { HashAlgorithm::SHA1, SignatureAlgorithm::RSA });
+        { HashAlgorithm::SHA1, SignatureAlgorithm::RSA },
+        { HashAlgorithm::SHA384, SignatureAlgorithm::ECDSA });
     OPTION_WITH_DEFAULTS(Vector<SupportedGroup>, elliptic_curves,
         SupportedGroup::X25519,
         SupportedGroup::SECP256R1,
@@ -371,6 +373,7 @@ private:
     void build_rsa_pre_master_secret(PacketBuilder&);
     void build_dhe_rsa_pre_master_secret(PacketBuilder&);
     void build_ecdhe_rsa_pre_master_secret(PacketBuilder&);
+    void build_ecdhe_ecdsa_pre_master_secret(PacketBuilder&);
 
     ErrorOr<bool> flush();
     void write_into_socket();
@@ -385,6 +388,7 @@ private:
     ssize_t handle_server_key_exchange(ReadonlyBytes);
     ssize_t handle_dhe_rsa_server_key_exchange(ReadonlyBytes);
     ssize_t handle_ecdhe_rsa_server_key_exchange(ReadonlyBytes);
+    ssize_t handle_ecdhe_ecdsa_server_key_exchange(ReadonlyBytes);
     ssize_t handle_server_hello_done(ReadonlyBytes);
     ssize_t handle_certificate_verify(ReadonlyBytes);
     ssize_t handle_handshake_payload(ReadonlyBytes);

@@ -346,6 +346,7 @@ bool Context::verify_certificate_pair(Certificate const& subject, Certificate co
 {
     Crypto::Hash::HashKind kind = Crypto::Hash::HashKind::Unknown;
     auto identifier = subject.signature_algorithm.identifier;
+    auto is_rsa = true;
 
     if (identifier == rsa_encryption_oid)
         kind = Crypto::Hash::HashKind::None;
@@ -359,10 +360,19 @@ bool Context::verify_certificate_pair(Certificate const& subject, Certificate co
         kind = Crypto::Hash::HashKind::SHA384;
     if (identifier == rsa_sha512_encryption_oid)
         kind = Crypto::Hash::HashKind::SHA512;
+    if (identifier == ecdsa_with_sha384_encryption_oid) {
+        kind = Crypto::Hash::HashKind::SHA384;
+        is_rsa = false;
+    }
 
     if (kind == Crypto::Hash::HashKind::Unknown) {
         dbgln("verify_certificate_pair: Unknown signature algorithm, expected RSA with SHA1/256/384/512, got OID {}", identifier);
         return false;
+    }
+
+    if (!is_rsa) {
+        // FIXME: Implement ECDSA verification
+        return true;
     }
 
     Crypto::PK::RSAPrivateKey dummy_private_key;

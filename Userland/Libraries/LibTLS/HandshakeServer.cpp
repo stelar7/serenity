@@ -64,10 +64,6 @@ ssize_t TLSv12::handle_server_hello(ReadonlyBytes buffer, WritePacketStage& writ
     if (session_length && session_length <= 32) {
         memcpy(m_context.session_id, buffer.offset_pointer(res), session_length);
         m_context.session_id_size = session_length;
-        if constexpr (TLS_DEBUG) {
-            dbgln("Remote session ID:");
-            print_buffer(ReadonlyBytes { m_context.session_id, session_length });
-        }
     } else {
         m_context.session_id_size = 0;
     }
@@ -85,7 +81,6 @@ ssize_t TLSv12::handle_server_hello(ReadonlyBytes buffer, WritePacketStage& writ
         return (i8)Error::NoCommonCipher;
     }
     m_context.cipher = cipher;
-    dbgln_if(TLS_DEBUG, "Cipher: {}", enum_to_string(cipher));
 
     // Simplification: We only support handshake hash functions via HMAC
     m_context.handshake_hash.initialize(hmac_hash());
@@ -241,8 +236,7 @@ ssize_t TLSv12::handle_server_key_exchange(ReadonlyBytes buffer)
     case KeyExchangeAlgorithm::ECDH_RSA:
     case KeyExchangeAlgorithm::ECDHE_ECDSA:
     case KeyExchangeAlgorithm::ECDH_anon:
-        dbgln("Server key exchange for ECDHE algorithms is not implemented");
-        TODO();
+        return handle_ecdhe_ecdsa_server_key_exchange(buffer);
         break;
     default:
         dbgln("Unknown server key exchange algorithm");
@@ -341,6 +335,62 @@ ssize_t TLSv12::handle_ecdhe_rsa_server_key_exchange(ReadonlyBytes buffer)
     auto server_key_info = buffer.slice(3, 4 + server_public_key_length);
     auto signature = buffer.slice(7 + server_public_key_length);
     return verify_rsa_server_key_exchange(server_key_info, signature);
+}
+
+ssize_t TLSv12::handle_ecdhe_ecdsa_server_key_exchange(ReadonlyBytes buffer)
+{
+    if (buffer.size() < 7)
+        return (i8)Error::NeedMoreData;
+
+    auto curve_type = buffer[3];
+    if (curve_type != (u8)ECCurveType::NAMED_CURVE)
+        return (i8)Error::NotUnderstood;
+
+    auto curve = static_cast<SupportedGroup>(AK::convert_between_host_and_network_endian(ByteReader::load16(buffer.offset_pointer(4))));
+    if (!m_context.options.elliptic_curves.contains_slow(curve))
+        return (i8)Error::NotUnderstood;
+
+    switch ((SupportedGroup)curve) {
+    case SupportedGroup::X25519:
+        m_context.server_key_exchange_curve = make<Crypto::Curves::X25519>();
+        break;
+    case SupportedGroup::X448:
+        m_context.server_key_exchange_curve = make<Crypto::Curves::X448>();
+        break;
+    case SupportedGroup::SECP256R1:
+        m_context.server_key_exchange_curve = make<Crypto::Curves::SECP256r1>();
+        break;
+    default:
+        return (i8)Error::NotUnderstood;
+    }
+
+    auto server_public_key_length = buffer[6];
+    if (server_public_key_length != m_context.server_key_exchange_curve->key_size())
+        return (i8)Error::NotUnderstood;
+
+    if (buffer.size() < 7u + server_public_key_length)
+        return (i8)Error::NeedMoreData;
+
+    auto server_public_key = buffer.slice(7, server_public_key_length);
+    auto server_public_key_copy_result = ByteBuffer::copy(server_public_key);
+    if (server_public_key_copy_result.is_error()) {
+        dbgln("handle_ecdhe_ecdsa_server_key_exchange failed: Not enough memory");
+        return (i8)Error::OutOfMemory;
+    }
+    m_context.server_diffie_hellman_params.p = server_public_key_copy_result.release_value();
+
+    if constexpr (TLS_DEBUG) {
+        dbgln("ECDHE server public key: {:hex-dump}", server_public_key);
+    }
+
+    /*
+        FIXME: Implement ECDSA verification
+        auto server_key_info = buffer.slice(3, 4 + server_public_key_length);
+        auto signature = buffer.slice(7 + server_public_key_length);
+        return verify_ecdsa_server_key_exchange(server_key_info, signature);
+    */
+
+    return 0;
 }
 
 ssize_t TLSv12::verify_rsa_server_key_exchange(ReadonlyBytes server_key_info_buffer, ReadonlyBytes signature_buffer)

@@ -307,6 +307,58 @@ void TLSv12::build_ecdhe_rsa_pre_master_secret(PacketBuilder& builder)
     builder.append(public_key);
 }
 
+void TLSv12::build_ecdhe_ecdsa_pre_master_secret(PacketBuilder& builder)
+{
+    // Create a random private key
+    auto private_key_result = m_context.server_key_exchange_curve->generate_private_key();
+    if (private_key_result.is_error()) {
+        dbgln("Failed to build ECDHE_ECDSA premaster secret: not enough memory");
+        return;
+    }
+    auto private_key = private_key_result.release_value();
+
+    // Calculate the public key from the private key
+    auto public_key_result = m_context.server_key_exchange_curve->generate_public_key(private_key);
+    if (public_key_result.is_error()) {
+        dbgln("Failed to build ECDHE_ECDSA premaster secret: not enough memory");
+        return;
+    }
+    auto public_key = public_key_result.release_value();
+
+    // Calculate the shared point by multiplying the client private key and the server public key
+    ReadonlyBytes server_public_key_bytes = m_context.server_diffie_hellman_params.p;
+    auto shared_point_result = m_context.server_key_exchange_curve->compute_coordinate(private_key, server_public_key_bytes);
+    if (shared_point_result.is_error()) {
+        dbgln("Failed to build ECDHE_ECDSA premaster secret: not enough memory");
+        return;
+    }
+    auto shared_point = shared_point_result.release_value();
+
+    // Derive the premaster key from the shared point
+    auto premaster_key_result = m_context.server_key_exchange_curve->derive_premaster_key(shared_point);
+    if (premaster_key_result.is_error()) {
+        dbgln("Failed to build ECDHE_ECDSA premaster secret: not enough memory");
+        return;
+    }
+    m_context.premaster_key = premaster_key_result.release_value();
+
+    if constexpr (TLS_DEBUG) {
+        dbgln("Build ECDHE_ECDSA pre master secret");
+        dbgln("client private key: {:hex-dump}", (ReadonlyBytes)private_key);
+        dbgln("client public key:  {:hex-dump}", (ReadonlyBytes)public_key);
+        dbgln("premaster key:      {:hex-dump}", (ReadonlyBytes)m_context.premaster_key);
+    }
+
+    if (!compute_master_secret_from_pre_master_secret(48)) {
+        dbgln("oh noes we could not derive a master key :(");
+        return;
+    }
+
+    builder.append_u24(public_key.size() + 1);
+    builder.append((u8)public_key.size());
+    builder.append(public_key);
+}
+
 ByteBuffer TLSv12::build_certificate()
 {
     PacketBuilder builder { ContentType::HANDSHAKE, m_context.options.version };
@@ -399,8 +451,7 @@ ByteBuffer TLSv12::build_client_key_exchange()
     case KeyExchangeAlgorithm::ECDH_RSA:
     case KeyExchangeAlgorithm::ECDHE_ECDSA:
     case KeyExchangeAlgorithm::ECDH_anon:
-        dbgln("Client key exchange for ECDHE algorithms is not implemented");
-        TODO();
+        build_ecdhe_ecdsa_pre_master_secret(builder);
         break;
     default:
         dbgln("Unknown client key exchange algorithm");
