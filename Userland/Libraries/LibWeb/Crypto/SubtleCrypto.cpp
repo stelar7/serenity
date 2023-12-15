@@ -184,6 +184,100 @@ JS::NonnullGCPtr<JS::Promise> SubtleCrypto::digest(AlgorithmIdentifier const& al
     return promise;
 }
 
+// https://w3c.github.io/webcrypto/#SubtleCrypto-method-importKey
+JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::Promise>> SubtleCrypto::import_key(Bindings::KeyFormat format, KeyDataType key_data, AlgorithmIdentifier algorithm, bool extractable, Vector<Bindings::KeyUsage> key_usages)
+{
+    auto& realm = this->realm();
+
+    // 1. Let format, algorithm, extractable and usages, be the format, algorithm, extractable
+    // and key_usages parameters passed to the importKey() method, respectively.
+
+    Variant<ByteBuffer, Bindings::JsonWebKey, Empty> real_key_data;
+    // 2. If format is equal to the string "raw", "pkcs8", or "spki":
+    if (format == Bindings::KeyFormat::Raw || format == Bindings::KeyFormat::Pkcs8 || format == Bindings::KeyFormat::Spki) {
+        // 1. If the keyData parameter passed to the importKey() method is a JsonWebKey dictionary, throw a TypeError.
+        if (key_data.has<Bindings::JsonWebKey>()) {
+            return realm.vm().throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "BufferSource");
+        }
+
+        // 2. Let keyData be the result of getting a copy of the bytes held by the keyData parameter passed to the importKey() method.
+        auto data_buffer_or_error = WebIDL::get_buffer_source_copy(*key_data.get<JS::Handle<WebIDL::BufferSource>>()->raw_object());
+        if (data_buffer_or_error.is_error()) {
+            auto error = WebIDL::OperationError::create(realm, "Failed to copy bytes from ArrayBuffer"_fly_string);
+            auto promise = JS::Promise::create(realm);
+            promise->reject(error.ptr());
+            return promise;
+        }
+        real_key_data = data_buffer_or_error.value();
+    }
+
+    if (format == Bindings::KeyFormat::Jwk) {
+        // 1. If the keyData parameter passed to the importKey() method is not a JsonWebKey dictionary, throw a TypeError.
+        if (!key_data.has<Bindings::JsonWebKey>()) {
+            return realm.vm().throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "JsonWebKey");
+        }
+
+        // 2. Let keyData be the keyData parameter passed to the importKey() method.
+        real_key_data = key_data.get<Bindings::JsonWebKey>();
+    }
+
+    // NOTE: The spec jumps to 5 here for some reason?
+    // 5. Let normalizedAlgorithm be the result of normalizing an algorithm, with alg set to algorithm and op set to "importKey".
+    auto normalized_algorithm = normalize_an_algorithm(algorithm, "importKey"_string);
+
+    // 6. If an error occurred, return a Promise rejected with normalizedAlgorithm.
+    if (normalized_algorithm.is_error()) {
+        auto promise = JS::Promise::create(realm);
+        auto error = normalized_algorithm.release_error();
+        auto error_value = error.value().value();
+        promise->reject(error_value);
+        return promise;
+    }
+
+    // 7. Let promise be a new Promise.
+    auto promise = JS::Promise::create(realm);
+
+    // 8. Return promise and perform the remaining steps in parallel.
+    // FIXME: We don't have a good abstraction for this yet, so we do it in sync.
+
+    // 9. If the following steps or referenced procedures say to throw an error, reject promise with the returned error and then terminate the algorithm.
+
+    // 10. Let result be the CryptoKey object that results from performing the import key operation
+    // specified by normalizedAlgorithm using keyData, algorithm, format, extractable and usages.
+    if (normalized_algorithm.release_value().name != "PBKDF2"sv) {
+        auto error = WebIDL::NotSupportedError::create(realm, MUST(String::formatted("Invalid algorithm '{}'", normalized_algorithm.release_value().name)));
+        promise->reject(error.ptr());
+        return promise;
+    }
+    auto maybe_result = pbkdf2_import_key(real_key_data, algorithm, format, extractable, key_usages);
+    if (maybe_result.is_error()) {
+        auto error = maybe_result.release_error();
+        auto error_value = error.value().value();
+        promise->reject(error_value);
+        return promise;
+    }
+
+    auto result = maybe_result.release_value();
+
+    // 11. If the [[type]] internal slot of result is "secret" or "private" and usages is empty, then throw a SyntaxError.
+    if ((result->type() == Bindings::KeyType::Secret || result->type() == Bindings::KeyType::Private) && key_usages.is_empty()) {
+        auto error = WebIDL::SyntaxError::create(realm, "usages must not be empty"_fly_string);
+        promise->reject(error.ptr());
+        return promise;
+    }
+
+    // 12. Set the [[extractable]] internal slot of result to extractable.
+    result->set_extractable(extractable);
+
+    // 13. Set the [[usages]] internal slot of result to the normalized value of usages.
+    // FIXME: result->set_usages(key_usages);
+
+    // 14. Resolve promise with result.
+    promise->fulfill(result);
+
+    return promise;
+}
+
 SubtleCrypto::SupportedAlgorithmsMap& SubtleCrypto::supported_algorithms_internal()
 {
     static SubtleCrypto::SupportedAlgorithmsMap s_supported_algorithms;
@@ -227,6 +321,11 @@ SubtleCrypto::SupportedAlgorithmsMap SubtleCrypto::supported_algorithms()
     define_an_algorithm("digest"_string, "SHA-384"_string, ""_string);
     define_an_algorithm("digest"_string, "SHA-512"_string, ""_string);
 
+    // https://w3c.github.io/webcrypto/#pbkdf2
+    define_an_algorithm("importKey"_string, "PBKDF2"_string, ""_string);
+    // FIXME: define_an_algorithm("deriveBits"_string, "PBKDF2"_string, "Pbkdf2Params"_string);
+    // FIXME: define_an_algorithm("get key length"_string, "PBKDF2"_string, ""_string);
+
     return internal_object;
 }
 
@@ -243,6 +342,51 @@ void SubtleCrypto::define_an_algorithm(String op, String algorithm, String type)
     // 2. Set the alg key of registeredAlgorithms to the IDL dictionary type type.
     registered_algorithms.set(algorithm, type);
     internal_object.set(op, registered_algorithms);
+}
+
+// https://w3c.github.io/webcrypto/#pbkdf2-operations
+JS::ThrowCompletionOr<JS::NonnullGCPtr<CryptoKey>> SubtleCrypto::pbkdf2_import_key([[maybe_unused]] Variant<ByteBuffer, Bindings::JsonWebKey, Empty> key_data, [[maybe_unused]] AlgorithmIdentifier algorithm_parameter, Bindings::KeyFormat format, bool extractable, Vector<Bindings::KeyUsage> key_usages)
+{
+    auto& realm = this->realm();
+
+    // 1. If format is not "raw", throw a NotSupportedError
+    if (format != Bindings::KeyFormat::Raw) {
+        // FIXME: This should be a NotSupportedError
+        return realm.vm().throw_completion<JS::TypeError>(JS::ErrorType::NotImplemented, idl_enum_to_string(format));
+    }
+
+    // 2. If usages contains a value that is not "deriveKey" or "deriveBits", then throw a SyntaxError.
+    for (auto& usage : key_usages) {
+        if (usage != Bindings::KeyUsage::Derivekey && usage != Bindings::KeyUsage::Derivebits) {
+            return realm.vm().throw_completion<JS::SyntaxError>(MUST(String::formatted("Invalid key usage '{}'", idl_enum_to_string(usage))));
+        }
+    }
+
+    // 3. If extractable is not false, then throw a SyntaxError.
+    if (extractable) {
+        return realm.vm().throw_completion<JS::SyntaxError>("extractable must be false"_string);
+    }
+
+    // 4. Let key be a new CryptoKey representing keyData.
+    auto key = CryptoKey::create(realm);
+
+    // 5. Set the [[type]] internal slot of key to "secret".
+    key->set_type(Bindings::KeyType::Secret);
+
+    // 6. Set the [[extractable]] internal slot of key to false.
+    key->set_extractable(false);
+
+    // 7. Let algorithm be a new KeyAlgorithm object.
+    auto algorithm = Bindings::KeyAlgorithm::create(realm);
+
+    // 8. Set the name attribute of algorithm to "PBKDF2".
+    algorithm->set_name("PBKDF2"_string);
+
+    // 9. Set the [[algorithm]] internal slot of key to algorithm.
+    key->set_algorithm(algorithm);
+
+    // 10. Return key.
+    return key;
 }
 
 }
