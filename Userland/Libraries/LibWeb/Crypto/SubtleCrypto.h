@@ -11,6 +11,7 @@
 #include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibJS/Forward.h>
+#include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibWeb/Bindings/PlatformObject.h>
 #include <LibWeb/Bindings/SubtleCryptoPrototype.h>
 #include <LibWeb/Crypto/CryptoBindings.h>
@@ -33,6 +34,7 @@ public:
 
     JS::NonnullGCPtr<JS::Promise> digest(AlgorithmIdentifier const& algorithm, JS::Handle<WebIDL::BufferSource> const& data);
     JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::Promise>> import_key(Bindings::KeyFormat format, KeyDataType keyData, AlgorithmIdentifier algorithm, bool extractable, Vector<Bindings::KeyUsage> keyUsages);
+    JS::NonnullGCPtr<JS::Promise> derive_bits(AlgorithmIdentifier algorithm, CryptoKey const& base_key, u32 length);
 
 private:
     explicit SubtleCrypto(JS::Realm&);
@@ -41,6 +43,7 @@ private:
     JS::ThrowCompletionOr<Bindings::Algorithm> normalize_an_algorithm(AlgorithmIdentifier const& algorithm, String operation);
 
     JS::ThrowCompletionOr<JS::NonnullGCPtr<CryptoKey>> pbkdf2_import_key(Variant<ByteBuffer, Bindings::JsonWebKey, Empty> key_data, AlgorithmIdentifier algorithm, Bindings::KeyFormat format, bool extractable, Vector<Bindings::KeyUsage> usages);
+    JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::ArrayBuffer>> pbkdf2_derive_bits(CryptoKey const& base_key, Bindings::Pbkdf2Params* normalized_algorithm, u32 length);
 
     static SubtleCrypto::SupportedAlgorithmsMap& supported_algorithms_internal();
     static SubtleCrypto::SupportedAlgorithmsMap supported_algorithms();

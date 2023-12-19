@@ -64,7 +64,7 @@ private:
 };
 
 // https://w3c.github.io/webcrypto/#pbkdf2-params
-struct Pbkdf2Params {
+struct Pbkdf2Params : public Algorithm {
     JS::Handle<WebIDL::BufferSource> salt;
     u32 iterations;
     Variant<JS::Handle<JS::Object>, String> hash;

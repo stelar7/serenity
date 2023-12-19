@@ -6,6 +6,7 @@
  */
 
 #include <LibCrypto/Hash/HashManager.h>
+#include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/Promise.h>
 #include <LibWeb/Bindings/Intrinsics.h>
@@ -61,8 +62,6 @@ JS::ThrowCompletionOr<Bindings::Algorithm> SubtleCrypto::normalize_an_algorithm(
 
     // 2. Let initialAlg be the result of converting the ECMAScript object represented by alg to
     // the IDL dictionary type Algorithm, as defined by [WebIDL].
-    // FIXME: How do we turn this into an "Algorithm" in a nice way?
-    // NOTE: For now, we just use the object as-is.
     auto initial_algorithm = algorithm.get<JS::Handle<JS::Object>>();
 
     // 3. If an error occurred, return the error and terminate this algorithm.
@@ -93,7 +92,7 @@ JS::ThrowCompletionOr<Bindings::Algorithm> SubtleCrypto::normalize_an_algorithm(
 
     // 8. Let normalizedAlgorithm be the result of converting the ECMAScript object represented by alg
     // to the IDL dictionary type desiredType, as defined by [WebIDL].
-    // FIXME: Should IDL generate a struct for each of these?
+    // FIXME: Create a pointer here based on the type of desiredType
     Bindings::Algorithm normalized_algorithm;
 
     // 9. Set the name attribute of normalizedAlgorithm to algName.
@@ -270,10 +269,89 @@ JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::Promise>> SubtleCrypto::import_key(Bi
     result->set_extractable(extractable);
 
     // 13. Set the [[usages]] internal slot of result to the normalized value of usages.
-    // FIXME: result->set_usages(key_usages);
+    // NOTE: We are always normalized, due to taking a enum as input.
+    Vector<JS::Value> key_usages_values;
+    key_usages_values.ensure_capacity(key_usages.size());
+    for (auto& usage : key_usages) {
+        auto primitive = JS::PrimitiveString::create(realm.vm(), idl_enum_to_string(usage));
+        key_usages_values.append(JS::Value(primitive));
+    }
+    auto normalized_usages = JS::Array::create_from(realm, key_usages_values);
+    result->set_usages(normalized_usages);
 
     // 14. Resolve promise with result.
     promise->fulfill(result);
+
+    return promise;
+}
+
+// https://w3c.github.io/webcrypto/#SubtleCrypto-method-deriveBits
+JS::NonnullGCPtr<JS::Promise> SubtleCrypto::derive_bits(AlgorithmIdentifier algorithm, CryptoKey const& base_key, u32 length)
+{
+    auto& realm = this->realm();
+
+    // 1. Let algorithm, baseKey and length, be the algorithm, baseKey and length parameters passed to the deriveBits() method, respectively.
+
+    // 2. Let normalizedAlgorithm be the result of normalizing an algorithm, with alg set to algorithm and op set to "deriveBits".
+    auto normalized_algorithm = normalize_an_algorithm(algorithm, "deriveBits"_string);
+
+    // 3. If an error occurred, return a Promise rejected with normalizedAlgorithm.
+    if (normalized_algorithm.is_error()) {
+        auto promise = JS::Promise::create(realm);
+        auto error = normalized_algorithm.release_error();
+        auto error_value = error.value().value();
+        promise->reject(error_value);
+        return promise;
+    }
+
+    // 4. Let promise be a new Promise object.
+    auto promise = JS::Promise::create(realm);
+
+    // 5. Return promise and perform the remaining steps in parallel.
+    // FIXME: We don't have a good abstraction for this yet, so we do it in sync.
+
+    // 6. If the following steps or referenced procedures say to throw an error,
+    //    reject promise with the returned error and then terminate the algorithm.
+
+    // 7. If the name member of normalizedAlgorithm is not equal to the name attribute of
+    //    the [[algorithm]] internal slot of baseKey then throw an InvalidAccessError.
+    auto key_algorithm = static_cast<Bindings::KeyAlgorithm const*>(base_key.algorithm());
+    if (normalized_algorithm.release_value().name != key_algorithm->name()) {
+        auto error = WebIDL::InvalidAccessError::create(realm, "Algorithm mismatch"_fly_string);
+        promise->reject(error.ptr());
+        return promise;
+    }
+
+    // FIXME: 8. If the [[usages]] internal slot of baseKey does not contain an entry that is "deriveBits", then throw an InvalidAccessError.
+    /*
+    auto key_usages = static_cast<JS::Array const*>(base_key.usages());
+    if (!any_of(key_usages, [](auto& usage) { return usage == idl_enum_to_string(Bindings::KeyUsage::Derivebits); })) {
+        auto error = WebIDL::InvalidAccessError::create(realm, "Key does not support deriveBits"_fly_string);
+        promise->reject(error.ptr());
+        return promise;
+    }
+    */
+
+    // 9. Let result be the result of creating an ArrayBuffer containing the result of performing the derive bits operation
+    //    specified by normalizedAlgorithm using baseKey, algorithm and length.
+    // NOTE: Spec says to use algorithm here, but PBKDF2 wans the normalizedAlgorithm instead.
+    auto algorithm_object = normalized_algorithm.release_value();
+    if (algorithm_object.name != "PBKDF2"sv) {
+        auto error = WebIDL::NotSupportedError::create(realm, MUST(String::formatted("Invalid algorithm '{}'", normalized_algorithm.release_value().name)));
+        promise->reject(error.ptr());
+        return promise;
+    }
+
+    auto maybe_result = pbkdf2_derive_bits(base_key, algorithm_object, length);
+    if (maybe_result.is_error()) {
+        auto error = maybe_result.release_error();
+        auto error_value = error.value().value();
+        promise->reject(error_value);
+        return promise;
+    }
+
+    // 10. Resolve promise with result.
+    promise->fulfill(maybe_result.release_value());
 
     return promise;
 }
@@ -323,7 +401,7 @@ SubtleCrypto::SupportedAlgorithmsMap SubtleCrypto::supported_algorithms()
 
     // https://w3c.github.io/webcrypto/#pbkdf2
     define_an_algorithm("importKey"_string, "PBKDF2"_string, ""_string);
-    // FIXME: define_an_algorithm("deriveBits"_string, "PBKDF2"_string, "Pbkdf2Params"_string);
+    define_an_algorithm("deriveBits"_string, "PBKDF2"_string, "Pbkdf2Params"_string);
     // FIXME: define_an_algorithm("get key length"_string, "PBKDF2"_string, ""_string);
 
     return internal_object;
@@ -387,6 +465,42 @@ JS::ThrowCompletionOr<JS::NonnullGCPtr<CryptoKey>> SubtleCrypto::pbkdf2_import_k
 
     // 10. Return key.
     return key;
+}
+
+JS::ThrowCompletionOr<JS::NonnullGCPtr<JS::ArrayBuffer>> SubtleCrypto::pbkdf2_derive_bits(CryptoKey const& base_key, Bindings::Pbkdf2Params* normalized_algorithm, u32 length)
+{
+    auto& realm = this->realm();
+
+    // 1. If length is null or zero, or is not a multiple of 8, then throw an OperationError.
+    if (length == 0 || length % 8 != 0) {
+        return WebIDL::OperationError::create(realm, "Length must be a multiple of 8"_fly_string);
+    }
+
+    // 2. If the iterations member of normalizedAlgorithm is zero, then throw an OperationError.
+    if (normalized_algorithm->iterations == 0) {
+        return WebIDL::OperationError::create(realm, "Iterations must not be zero"_fly_string);
+    }
+
+    // FIXME: 3. Let prf be the MAC Generation function described in Section 4 of [FIPS-198-1]
+    //    using the hash function described by the hash member of normalizedAlgorithm.
+
+    // FIXME: 4. Let result be the result of performing the PBKDF2 operation defined in Section 5.2 of [RFC8018]
+    //        using prf as the pseudo-random function, PRF,
+    //        the password represented by [[handle]] internal slot of key as the password, P,
+    //        the contents of the salt attribute of normalizedAlgorithm as the salt, S,
+    //        the value of the iterations attribute of normalizedAlgorithm as the iteration count, c,
+    //        and length divided by 8 as the intended key length, dkLen.
+    auto maybe_result_buffer = ByteBuffer::create_uninitialized(length / 8);
+
+    // 5. If the key derivation operation fails, then throw an OperationError.
+    if (maybe_result_buffer.is_error()) {
+        return WebIDL::OperationError::create(realm, "Failed to create result buffer"_fly_string);
+    }
+
+    auto output = JS::ArrayBuffer::create(realm, maybe_result_buffer.release_value());
+
+    // 6. Return result
+    return output;
 }
 
 }
